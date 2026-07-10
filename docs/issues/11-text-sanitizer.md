@@ -21,31 +21,38 @@ prerequisite for helper injection (18), lock messages (19), hints (23), and solu
 
 ## Detailed Requirements
 
-1. `Sanitize(s string, maxRunes int) string` — pipeline, in order:
+1. `Sanitize(s string, maxRunes int) string` — pipeline, in this exact order (ESC parsing FIRST,
+   so sequence payloads are consumed as sequences rather than surviving generic control stripping):
    1. Enforce valid UTF-8: invalid bytes dropped (decode loop; do not insert U+FFFD).
-   2. Remove all C0 controls except `\n` and `\t`; remove DEL (0x7F); remove all C1 (0x80–0x9F).
-   3. Remove ESC-introduced sequences entirely: CSI (`ESC [` … final byte 0x40–0x7E), OSC
-      (`ESC ]` … terminated by BEL or ST, including unterminated → strip to end), DCS/SOS/PM/APC
-      (`ESC P/X/^/_` … ST), two-char sequences (`ESC` + single byte). A bare trailing ESC is dropped.
+   2. Parse and remove ESC-introduced sequences entirely: CSI (`ESC [` … final byte 0x40–0x7E),
+      OSC (`ESC ]` … terminated by BEL or ST, including unterminated → strip to end), DCS/SOS/PM/APC
+      (`ESC P/X/^/_` … ST), two-char sequences (`ESC` + single byte). A bare trailing ESC is
+      dropped. Also parse C1-form CSI/OSC (single bytes U+009B / U+009D) as sequence introducers.
+   3. Remove remaining control runes: C0 except `\n`/`\t`, DEL (U+007F), and C1 (U+0080–U+009F).
    4. Remove Unicode bidi/format controls: U+200E, U+200F, U+202A–U+202E, U+2066–U+2069, U+2028, U+2029, U+00AD.
-   5. Truncate to `maxRunes` runes; if truncated, append `…`.
-2. `SanitizeInline(s string, maxRunes int) string` — same, but `\n`/`\t` become single spaces
+   5. Truncate to `maxRunes` runes; if truncated, the output's final rune is `…` and total length
+      is ≤ `maxRunes` runes (the ellipsis counts). `maxRunes <= 0` → returns `""`.
+2. `SanitizeInline(s string, maxRunes int) string` — same pipeline with an added step between 4
+   and 5: every run of `\n`/`\t` (and resulting multi-spaces) collapses to a single space
    (for table cells / titles).
 3. Zero allocations is not required; correctness and auditability are. No regex for ESC parsing —
    explicit state machine (regex misses unterminated-OSC edge cases).
-4. Document the exemption: bytes flowing inside the interactive PTY session (17) are NOT sanitized
-   (the player asked for a real terminal into the sandbox); all other sinks MUST use this package.
-5. Adversarial corpus (committed as `testdata/hostile.txt` cases + table tests) must include:
+4. Document the exemption in `internal/textsafe/doc.go` (package comment): bytes flowing inside
+   the interactive PTY session (17) are NOT sanitized (the player asked for a real terminal into
+   the sandbox — DESIGN §10.2 TB2 residual risk); all other sinks MUST use this package.
+5. Adversarial corpus: expressed as Go table-test cases (input as Go string literals with escape
+   sequences — no binary fixture files; a small `testdata/seed/` dir holds fuzz seeds only) and
+   must include:
    color CSI, cursor-move CSI, `OSC 0` title set, `OSC 8` hyperlink, `OSC 52` clipboard write,
    unterminated OSC, DCS passthrough, `\r` overwrite trick, C1 CSI (0x9B), RTL override sandwich,
    zero-width joiner flood (length cap), invalid UTF-8 overlong sequence, 1 MiB input (cap performance).
 
 ## Acceptance Criteria
 
-- [ ] Every corpus case yields output free of: bytes < 0x20 (except `\n`,`\t`), 0x7F–0x9F, ESC, listed bidi/format runes.
+- [ ] Every corpus case yields output whose **decoded runes** contain no: runes < U+0020 (except `\n`,`\t`), U+007F–U+009F, ESC, or the listed bidi/format runes. (Rune-level assertion — raw byte scans would false-positive on UTF-8 continuation bytes.)
 - [ ] Idempotence test: `Sanitize(Sanitize(x)) == Sanitize(x)` over the corpus.
-- [ ] Truncation adds `…` and never splits a rune.
-- [ ] Fuzz test (`go test -fuzz=FuzzSanitize -fuzztime=30s` in CI weekly job note): output always passes the byte-class assertions; add seed corpus.
+- [ ] Truncation: output ≤ maxRunes runes, ends with `…` when truncated, never splits a rune; `maxRunes<=0` → "".
+- [ ] Fuzz smoke in normal CI (`-fuzz=FuzzSanitize -fuzztime=5s`): output always passes the rune-class assertions; seed corpus committed. (The 60s weekly fuzz job is OWNED BY issue 35 — not this issue.)
 
 ## Validation
 

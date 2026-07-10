@@ -31,12 +31,19 @@ quality is a product feature (research doc, risk 3).
    - Collect `Facts{ServerVersion, APIVersion, OSType, Arch, NCPU, MemTotal, DockerRootDir, Endpoint}`.
 3. Typed errors carry `exitcode.DockerUnavailable (3)` via `exitcode.Coded`.
 4. `doctor` command output (stdout, table via simple fmt — ui package may not exist yet):
-   - Docker: reachable? endpoint (host string as reported; do not print env secrets), server/API version, OSType/arch, CPUs, memory.
-   - DebugDungeon: version, state root path, state root writable (create+delete probe file), config file found?
+   - Docker: reachable? endpoint **redacted** (print scheme + host/socket path only; strip
+     userinfo and query strings from `DOCKER_HOST`-style URLs before any output/log — TB1
+     credential hygiene), server/API version, OSType/arch, CPUs, memory.
+   - DebugDungeon: version, state root path, state-dir status: missing dirs → `warn` (doctor
+     creates NOTHING); present → writable probe (create+delete `.probe` file); config file found?
    - Managed leftovers: count of containers and images labeled `com.debugdungeon.managed=true`
-     (read-only `ContainerList`/`ImageList` with label filter; zero is fine) + total image size; suggest `clean` when > 0 / > 10 GiB.
+     (read-only `ContainerList`/`ImageList` with label filter; zero is fine) + total managed image
+     size via the `DiskUsage` API (fallback: sum of `ImageSummary.Size` — shared layers may
+     double-count; print `~` prefix); suggest `clean` when > 0 / > 10 GiB. Listing failure after a
+     healthy ping → `warn`, not FAIL.
    - Each line prefixed `ok` / `warn` / `FAIL`.
-5. Exit codes: any FAIL → 3 (docker) or 1 (state dir); warnings only → 0.
+5. Exit-code precedence: any Docker-section FAIL → 3 (wins over everything); else any
+   state-dir FAIL (unwritable existing dir) → 1; warnings only → 0.
 6. `doctor` must complete < 5s (context timeout per call: 3s ping, 5s总). On unreachable daemon it
    still prints the DebugDungeon section (partial report).
 
@@ -49,7 +56,9 @@ quality is a product feature (research doc, risk 3).
 
 ## Validation
 
-`go test ./internal/dockerx/...`; manual transcripts (healthy + broken DOCKER_HOST) attached.
+`go test ./internal/dockerx/... ./internal/cli/...` (doctor command paths: healthy, unreachable,
+old API, non-linux OSType, unwritable state dir — mocked API, asserting messages + exit codes);
+manual transcripts (healthy + broken DOCKER_HOST) attached.
 Integration smoke behind `itest` tag: `Preflight` against real daemon.
 
 ## Dependencies

@@ -11,7 +11,7 @@ job actually produce its artifact.
 ## Context
 
 Teaches: cron's minimal environment, `%` semantics in crontab, absolute paths, redirecting job
-output to see errors, `run-parts` vs crontab. DESIGN §14 Floor 2 row 4.
+output to see errors. DESIGN §14 Floor 2 row 4.
 
 ## Scope
 
@@ -19,17 +19,18 @@ output to see errors, `run-parts` vs crontab. DESIGN §14 Floor 2 row 4.
 
 ## Detailed Requirements
 
-1. `scenario.yaml`: id `cron-curse`, floor 2, difficulty 2, topics `[cron, shell, env]`,
-   time_estimate_min 25. Install `cron`. Locks:
-   - `offering-made` / `A fresh offering lies on the altar` — `/var/altar/offering-*.txt` exists
-     with mtime < 120s… (SV014 caps at 60; instead: lock checks a *state file* the job writes:
-     newest offering mtime < 90s is not checkable in 60s… REDESIGN for testability: the fixed
-     job runs every minute (`* * * * *`), so: retry up to 55s for ANY offering file newer than
-     70s ago — max staleness after fix is 60s + write time, so a 55s retry window starting
-     post-solution suffices; solution.sh itself waits for the first artifact before exiting,
-     making the lock a fast re-verify. Document this timing contract in the check header.)
-   - `curse-lifted` / `The incantation is sound` — crontab line no longer contains an unescaped `%`
-     AND references the script by absolute path (grep-based on `/etc/cron.d/offering`).
+1. `scenario.yaml` (C3): id `cron-curse`, floor 2, difficulty 2, topics `[cron, shell, env]`,
+   time_estimate_min 25. Dockerfile (C3 preamble) installs `cron`. Locks:
+   - `offering-made` / `A fresh offering lies on the altar` — `timeout_sec: 60`; exact algorithm
+     (budget ≤ 55s): retry every 5s for any `/var/altar/offering-*.txt` whose age
+     (`now − mtime`) ≤ 70s. Timing contract (check header comment): the fixed job fires every
+     minute, and `solution.sh` itself waits for the first artifact before exiting, so by
+     lock-time a fresh offering exists and this lock is a fast re-verify; pristine state has no
+     files at all → CLOSED immediately after the retry budget.
+   - `curse-lifted` / `The incantation is sound` — exact predicate over `/etc/cron.d/offering`
+     non-comment lines: no `%` that is not preceded by `\` (`grep -E` for `(^|[^\\])%`), AND the
+     job line references `/opt/rituals/make-offering` (absolute), AND `RITUAL_HOME=` is assigned
+     (env header line or inline). Timeout 10.
 2. Dockerfile:
    - `/opt/rituals/make-offering` (sh, NOT in default cron PATH): writes
      `/var/altar/offering-$(date +%s).txt` with a blessing line; requires `RITUAL_HOME` env var set
@@ -37,7 +38,11 @@ output to see errors, `run-parts` vs crontab. DESIGN §14 Floor 2 row 4.
    - Broken `/etc/cron.d/offering`:
      `*/1 * * * * root make-offering > /var/altar/log-%date.txt 2>&1` — three faults: bare command
      name (PATH), unescaped `%` (cron treats as newline/stdin → job breaks), and no `RITUAL_HOME`.
-   - `/var/altar/` exists, empty; cron started by boot script; boot-ok; sleep infinity.
+   - Cron-file validity requirements (Debian cron ignores bad files silently — these prevent
+     accidental flake): `/etc/cron.d/offering` owner root:root, mode 0644, name matches cron.d
+     rules (it does), trailing newline REQUIRED; the broken file must still be syntactically
+     loadable (the `%` fault breaks the COMMAND, not the file). Boot: start `cron`, then C3
+     boot-ok marker, `exec sleep infinity`. `/var/altar/` exists, empty.
    - `/var/log/syslog`-less: install `rsyslog`? NO — keep light: cron's own mail is absent; the
      teaching moment is redirecting output yourself. Provide `/var/log/cron-hint.log` breadcrumb
      via a boot-time note in `/root/tavern-rumors.txt` ("the abbot swears the ritual is scheduled…").

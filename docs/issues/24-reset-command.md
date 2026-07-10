@@ -19,15 +19,20 @@ must match game rules exactly: resets are counted, the clock never resets.
 
 ## Detailed Requirements
 
-1. `Reset(ctx, deps, run) error` (valid from states `running`, `broken`):
+1. `Reset(ctx, deps, run) error` (valid from states `running`, `broken` via `CanRun`; state
+   mutations under short `WithLock` per 20):
    - transition → `resetting`, save.
    - Stop+remove old container (force; tolerate already-gone).
-   - Image present? (`ImageList` by `run.ImageRef`) — normally yes; if pruned meanwhile →
-     `EnsureImage` again (14) using the registry entry (content hash pinned by `run.ContentHash`;
-     mismatch with current registry hash → refuse with "scenario content changed since this run
-     started; give-up and start fresh" — protects §9 fairness).
-   - `CreateRoom` + `InjectHelpers` + `StartRoom` (15/18) → update `container_id`,
-     `resets++`, transition → `running`, save.
+   - Image present? (`ImageList` by `run.ImageRef`) — normally yes; if pruned meanwhile → resolve
+     the scenario via the registry (`ByID(run.ScenarioID)`; missing → refuse: "scenario no longer
+     installed — give-up to end this run") and compare hashes: registry hash ≠ `run.ContentHash` →
+     refuse with "scenario content changed since this run started; give-up and start fresh"
+     (protects DESIGN §9 rule-2/3 fairness); equal → `EnsureImage` (14).
+   - `CreateRoom` (15) → save container_id → `InjectHelpers` (18) → `StartRoom` → `resets++`,
+     transition → `running`, save (20's sequencing rule).
+   - **Failure mid-reset** (any step after the old container is gone): save state `broken` with
+     the error logged; the run is NOT lost — the player retries `reset` or `give-up` (F5 path).
+     A crash mid-reset leaves state `resetting`, which `Reconcile`-at-startup maps to `broken`.
 2. CLI: requires active run (exit 5), acquires run lock, y/N confirm
    (`This wipes the room's state (hints and the clock are kept). Continue?`; `--yes` skips),
    prints `The room reforms around you… (reset #N)` then resume guidance (`debugdungeon play <id>`).
@@ -49,7 +54,7 @@ must match game rules exactly: resets are counted, the clock never resets.
 
 ## Dependencies
 
-15, 20 (14 for the pruned-image path).
+10, 14, 15, 18, 20.
 
 ## Non-goals
 
@@ -57,4 +62,4 @@ Partial resets, snapshotting, keeping shell history across resets (HISTFILE dies
 
 ## Design References
 
-DESIGN §5.1, §7.3, §9.2–9.3, §11 F5.
+DESIGN §5.1, §7.3, §8.3–8.4, §9 (rules 2–3), §11 F5/F7.

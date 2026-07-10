@@ -24,8 +24,10 @@ SHA-pinned actions.
 2. Top-level `permissions: contents: read`. No job may widen this.
 3. `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }`.
 4. Jobs (all `runs-on: ubuntu-latest`, `timeout-minutes: 15`):
-   - `lint`: checkout → setup-go (`go-version-file: go.mod`, cache enabled) → golangci-lint official action.
-   - `test`: checkout → setup-go → `make test`.
+   - `lint`: `actions/checkout` → `actions/setup-go` (`go-version-file: go.mod`, cache enabled) →
+     `golangci/golangci-lint-action` (input `version:` pinned per CONVENTIONS C6).
+   - `test`: checkout → setup-go → `go mod verify` → `make test` →
+     `git diff --exit-code -- go.mod go.sum` (module-integrity gate, DESIGN §10.7).
 5. Every third-party action referenced by **full commit SHA** with a trailing comment naming the
    version tag, e.g. `uses: actions/checkout@<sha> # v4.x.x`. Resolve current SHAs at
    implementation time; do not copy SHAs from this document.
@@ -51,7 +53,8 @@ showing triggered/skipped runs. Run `actionlint` locally (or via `go run`) and p
 
 ## Non-goals
 
-Docker integration jobs, arm64 runners (29, KU-1), coverage upload, release automation.
+Docker integration jobs, arm64 runners (KU-1 is verified by issue 29, the first workflow needing
+them), coverage upload, release automation.
 
 ## Design References
 

@@ -44,30 +44,37 @@ output stay in sync.
    - `SV020` network == `none`
    - `SV021` **no symlinks anywhere** in the scenario tree (walk; any symlink is a violation)
    - `SV022` every file ≤ 4 MiB; total tree ≤ 16 MiB; ≤ 400 files; path depth ≤ 8
-   - `SV023` all paths referenced in the manifest resolve (after `path.Clean`) inside the scenario dir; reject absolute or `..`-containing references
+   - `SV023` all **host-side file references** in the manifest (`build.context`, `locks[].script`, `hints[].file`, `solution.*`) resolve (after `path.Clean`) inside the scenario dir; reject absolute or `..`-containing references. (Container paths — `entry.workdir`, `entry.shell`, `mounts.tmpfs[].path` — are absolute BY REQUIREMENT and governed by SV009/SV019, not SV023.)
    - `SV024` file/dir names `^[A-Za-z0-9._-]+$` (portability)
    - `SV025` scenario dir must not contain entries named `.git`, `.github`, or files with setuid/setgid mode bits (check via fs.FileInfo when available; os-backed FS only — document that embed.FS strips modes)
-3. Walking uses `fs.WalkDir` on the passed `fs.FS`; symlink detection requires an `os.DirFS`-backed
-   root — expose `ValidateDir(osRoot string, s *Spec)` variant using `os.Lstat` for SV021/SV025;
-   embedded content (already symlink-free by construction) uses the fs.FS path. Registry (10) and
-   pack install (59) must call the strictest variant available.
+   - `SV026` each `locks[].name` non-empty and ≤ 60 chars after `textsafe`-equivalent trim (raw length check here; rendering sanitization happens at display per CONVENTIONS C7)
+3. Two entry points with explicit path semantics:
+   - `Validate(fsys fs.FS, dir string, s *Spec) []RuleViolation` — `dir` is the scenario dir
+     relative to `fsys` (SV002 compares against `path.Base(dir)`); used for embedded content.
+   - `ValidateDir(scenarioDir string, s *Spec) []RuleViolation` — `scenarioDir` is an OS path to
+     the scenario directory itself (SV002 uses `filepath.Base`); wraps `os.DirFS(scenarioDir)` with
+     `dir="."` for shared rules and adds `os.Lstat`-based SV021/SV025.
+   Registry (10) and pack install (59) must call the strictest variant available.
+   Text-length rules (SV003/SV008/SV026) measure the RAW string; display-time sanitization is a
+   separate layer (CONVENTIONS C7) — validator never mutates content.
 4. Violations must be deterministic in order (sort by rule, then path).
 5. `docs/schemas/scenario-v1.schema.json`: JSON Schema (draft 2020-12) mirroring §6.2 field
-   constraints, header comment marking it **non-normative** (Go validator is normative).
-6. Corpus: `testdata/badscenarios/<case>/` — one per rule above (≥ 25 cases) + 2 fully valid
+   constraints, with a top-level `"$comment"` field marking it **non-normative** (JSON has no
+   comments; the Go validator is normative).
+6. Corpus: `testdata/badscenarios/<case>/` — one per rule above (≥ 26 cases) + 2 fully valid
    fixtures (minimal, maximal). A table test asserts exact rule codes per case.
 
 ## Acceptance Criteria
 
-- [ ] Every rule SV001–SV025 has ≥ 1 failing corpus case asserting its code; valid fixtures return zero violations.
+- [ ] Every rule SV001–SV026 has ≥ 1 failing corpus case asserting its code; valid fixtures return zero violations.
 - [ ] Symlink escape attempt (`hints/01.md -> /etc/passwd`) fails SV021 via `ValidateDir`.
 - [ ] Violation order deterministic (test shuffles input, output stable).
 - [ ] JSON Schema file parses (any JSON parser) and documents the same numeric bounds (spot-checked in test for 3 fields).
 
 ## Validation
 
-`go test ./internal/scenario/...` green; corpus tree committed; run `ValidateDir` against
-`scenarios/_template` once issue 12 lands (noted as follow-up check there).
+`go test ./internal/scenario/...` green; corpus tree committed. (The `_template` validation test
+belongs to issue 12's acceptance, not this issue's completion.)
 
 ## Dependencies
 

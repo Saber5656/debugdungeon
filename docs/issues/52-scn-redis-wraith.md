@@ -24,17 +24,23 @@ verification after repair. DESIGN §14 Floor 5 row 2; difficulty 4.
    - `wraith-risen` / `The wraith stirs` — `redis-cli -h 127.0.0.1 ping` → `PONG` (retries).
    - `memory-restored` / `The wraith remembers` — `redis-cli get soul:0001` → `intact` (the
      pre-corruption sentinel key survives repair).
-   - `keepsake-kept` / `Persistence still guards the memory` — `redis-cli config get appendonly` → `yes`
-     (guards the "just disable AOF" shortcut).
-2. Dockerfile + boot:
-   - Build-time: start redis briefly with `appendonly yes`, SET `soul:0001 intact` + ~100 filler
-     keys, clean shutdown; then **truncate the AOF mid-command**: `truncate -s -17` the appendonly
-     file (bookworm redis 7: files under `appendonlydir/` — truncate the last `.incr.aof`; verify
-     exact layout at implementation, document).
-   - Config: `appendonly yes`, `dir /var/lib/redis`, bind 127.0.0.1, `aof-load-truncated no`
-     (IMPORTANT: default `yes` would silently self-heal — setting `no` forces the refusal and the lesson; call this out).
-   - Boot: respawn-loop redis-server (fails, logging `Bad file format reading the append only file`
-     to `/var/log/redis/redis.log`), boot-ok, sleep infinity.
+   - `keepsake-kept` / `Persistence still guards the memory` — FILE-based (works while redis is
+     down — the review caught that `redis-cli config get` can't run against a dead server):
+     `/etc/redis/redis.conf` non-comment lines contain `appendonly yes` and no `appendonly no`.
+     Pristine (config untouched) → OPEN, per the ADR-006 note below. Timeout 10.
+2. Dockerfile + boot (C3 preamble; apt: `redis-server`, `redis-tools`):
+   - Config `/etc/redis/redis.conf` (exact keys): `appendonly yes`, `dir /var/lib/redis`,
+     `appenddirname "appendonlydir"`, `bind 127.0.0.1`, `daemonize no`,
+     `logfile /var/log/redis/redis.log`, `aof-load-truncated no` (IMPORTANT: default `yes` would
+     silently self-heal — `no` forces the refusal and the lesson; call this out in solution.md).
+   - Build-time: start `redis-server /etc/redis/redis.conf &` briefly AS the redis user (dirs
+     chowned redis:redis), SET `soul:0001 intact` + ~100 filler keys, clean `SHUTDOWN SAVE`; then
+     **corrupt the AOF**: redis-7 layout is `/var/lib/redis/appendonlydir/appendonly.aof.1.incr.aof`
+     (+ base/manifest) — `truncate -s -17` the `.incr.aof`, and the build MUST then assert the
+     corruption bites: `redis-server /etc/redis/redis.conf` exits non-zero with `Bad file format`
+     within 10s (build fails otherwise — guarantees pristine-closed locks; review catch).
+   - Boot (C3): respawn loop `while true; do su -s /bin/sh redis -c 'redis-server /etc/redis/redis.conf' >>/var/log/redis/boot.log 2>&1; sleep 5; done &`,
+     C3 boot-ok marker, sleep infinity.
 3. Fix: read log → `redis-check-aof --fix <file>` (answer `y`; note the tool warns about data-loss
    tail) → redis starts via respawn → verify keys.
 4. Hints: 01 the wraith dies at birth — its log names the exact ailment; which file does it choke
@@ -51,8 +57,8 @@ verification after repair. DESIGN §14 Floor 5 row 2; difficulty 4.
 - [ ] Harness green both arches; pristine: locks 1–2 closed, lock 3 OPEN (appendonly still yes).
 - [ ] Delete-the-AOF route → wraith rises but `memory-restored` stays closed (transcript).
 - [ ] `appendonly no` route → `keepsake-kept` closes (transcript).
-- [ ] Truncation point verified to corrupt (not merely shorten past a command boundary) — build asserts redis refuses to start pristine.
-- [ ] `ValidateDir` clean; image ≤ 250 MB; no flake ×3; redis-7 appendonlydir layout documented.
+- [ ] Truncation verified to corrupt at BUILD time (build fails if redis would start clean) — the assert step above.
+- [ ] `ValidateDir` clean; image ≤ 250 MB; no flake ×3; exact AOF path (`appendonlydir/appendonly.aof.1.incr.aof`) confirmed against the shipped redis version and recorded in solution.md.
 
 ## Validation
 

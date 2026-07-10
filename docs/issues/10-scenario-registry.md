@@ -30,14 +30,23 @@ registry; pack install (59) plugs into the same interface.
    - `LoadBundled() error` — enumerate top-level dirs of `scenarios.FS`, skip `_`-prefixed and
      non-dirs; for each: `LoadSpec` → `Validate` (fs.FS variant) → `ContentHash`; any invalid
      bundled scenario is a **fatal** registry error (bundled content must be perfect — CI enforces).
-   - `AddPackDir(osRoot string, pack string) error` — same pipeline with `ValidateDir` (08); ID
-     collision with an existing entry → error `ErrIDCollision` (used by 59; not wired to CLI yet).
+   - `AddPackDir(packRoot string, packName string) error` — `packRoot` is an installed pack
+     directory containing one or more scenario subdirectories (issue 59's layout); enumerate
+     subdirs (skip `pack.yaml`/dotfiles), run `LoadSpec` + `ValidateDir` (08) + `ContentHash` per
+     scenario. ID collision with any existing entry → `ErrIDCollision` (used by 59; not wired to
+     CLI yet).
+   - `LoadDir(scenarioDir string) (*Loaded, error)` — load ONE external scenario directory through
+     the strict pipeline (`ValidateDir`), `Source{Kind:"external"}`; consumed by `scenario
+     validate/test` (57). Never registered into the registry.
    - `ByID(id string) (*Loaded, bool)`; `All() []*Loaded` sorted by (floor, difficulty, id);
-     `Floors() [][] *Loaded` grouped.
+     `Floors() [][]*Loaded` — one inner slice per floor 1..6 that has ≥1 scenario (empty floors
+     omitted), inner ordering identical to `All()`.
    - `Materialize(ctx, l *Loaded) (buildCtxDir string, cleanup func(), err error)` — copy
-     `l.Dir/image` (build context only, per DESIGN §7.2) to a fresh `os.MkdirTemp` dir with mode
-     0700, preserving relative layout; files 0600 (exec bits irrelevant for build context — Dockerfile
-     COPY sets its own). cleanup removes the tree; caller must always defer it.
+     `path.Join(l.Dir, l.Spec.Build.Context)` (the validated build context, DESIGN §6.2/§7.2) to a
+     fresh `os.MkdirTemp` dir with mode 0700, preserving relative layout; files 0600 (exec bits
+     irrelevant for build context — Dockerfile COPY sets its own). For os-backed sources the copy
+     re-checks each entry with `os.Lstat` and refuses symlinks/non-regular files (TOCTOU defense
+     for mutable pack dirs). cleanup removes the tree; caller must always defer it.
 5. Registry construction happens once per process in cli wiring; commands receive it via context
    accessor `cli.Registry(ctx)`.
 6. Loading must NOT touch Docker or the network.
@@ -47,7 +56,7 @@ registry; pack install (59) plugs into the same interface.
 - [ ] With a `testdata` fixture wired through an `fstest.MapFS`/embed test double: bundled load
   indexes valid scenarios, skips `_template`, hard-fails on one invalid scenario (error names the id + rule code).
 - [ ] `ByID`, ordering of `All()` and `Floors()` covered by tests.
-- [ ] `Materialize` produces a build context whose file set exactly equals `image/` (walk-compare test) and cleanup removes it.
+- [ ] `Materialize` produces a build context whose file set exactly equals the spec's `build.context` dir (walk-compare test, incl. a non-default context fixture) and cleanup removes it; symlink smuggled into an os-backed context after load → refused.
 - [ ] ID collision path returns `ErrIDCollision`.
 - [ ] `go vet`/lint clean; no Docker/network imports in the package.
 
@@ -58,7 +67,7 @@ size delta in PR (< 1 MiB expected while content is sparse).
 
 ## Dependencies
 
-07, 08, 09.
+04 (cli context accessor wiring), 07, 08, 09.
 
 ## Non-goals
 

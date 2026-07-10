@@ -25,7 +25,7 @@ pattern (COOKBOOK §3–4) — no systemd.
    - `daemon-alive` / `The heart daemon beats steadily` — `heartd` process uptime > 10s
      (retry-with-deadline; manifest timeout 40).
    - `heartbeat-fresh` / `Fresh heartbeats reach the shrine` — `/var/lib/heartd/beat` mtime < 10s (retries).
-2. Dockerfile:
+2. Dockerfile (C3 preamble; apt: `procps` — `ps` is NOT in bookworm-slim and the hints/checks need it):
    - `/usr/local/bin/heartd` (sh): on start, parses `/etc/heartd.conf` (KEY=VALUE lines; accepts
      `interval`, `pidfile`, `beatfile`); unknown key → `heartd: fatal: unknown directive '<key>' (line N)`
      to `/var/log/heartd.log`, exit 1; missing pidfile dir → fatal too. Healthy: writes pidfile,
@@ -36,9 +36,10 @@ pattern (COOKBOOK §3–4) — no systemd.
      `ps`/log), boot-ok, sleep infinity.
    - `heartd --check /etc/heartd.conf` mode exists (validates without running) — the discoverable
      "config test" affordance (mentioned in `heartd --help`).
-3. Checks: `alive.sh` — pid from pidfile exists AND `/proc/<pid>` older than 10s (use
-   `cut -d. -f1 /proc/uptime` vs process start ticks, or simpler: two-sample check with sleep 5
-   inside retry loop); MSG guides to `/var/log/heartd.log`. `beat.sh` — beatfile mtime fresh.
+3. Checks: `daemon-alive.sh` — pid from pidfile exists AND
+   `[ "$(ps -o etimes= -p "$pid" | tr -d ' ')" -ge 10 ]` (single exact algorithm; retry loop up to
+   35s, manifest timeout 40); MSG guides to `/var/log/heartd.log`. `heartbeat-fresh.sh` — beatfile
+   mtime < 10s (retry loop ≤ 35s, timeout 40).
 4. Hints: 01 `ps aux | grep heartd` keeps changing pid — something restarts and dies; where do
    daemons complain? (`/var/log/`). 02 read the fatal lines: an unknown directive AND a pidfile
    path — fix the typo (`pidfil`→`pidfile`) and make the directory exist or point somewhere sane.

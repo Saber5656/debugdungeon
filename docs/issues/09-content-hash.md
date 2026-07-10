@@ -20,14 +20,22 @@ DESIGN §7.2 defines tag `debugdungeon/scn-<id>:<hash12>`.
 ## Detailed Requirements
 
 1. `ContentHash(fsys fs.FS, dir string) (string, error)`:
-   - Walk `dir` with `fs.WalkDir`, collect files, sort by slash-path ascending (byte order).
-   - **Exclusions** (relative to scenario root): `hints/` (entire dir), `solution.md`, `solution.sh`.
-     Everything else participates, including `scenario.yaml` and `checks/`.
-   - Digest input per file, in order: `rel_path` + `\x00` + mode class byte (`d` dir, `x` file with
-     any exec bit, `f` other file) + `\x00` + 8-byte big-endian length + file bytes. Directories
-     contribute path+class only. (fs.FS without mode info → class `f`; document that bundled embed
-     and os walks agree because template keeps scripts non-executable — cookbook rule, issue 12.)
-   - Output: lowercase hex SHA-256; helper `Short(h string) string` returns first 12 chars.
+   - Walk `dir` with `fs.WalkDir`; digest paths are slash-separated, `path.Clean`ed, **relative to
+     the scenario root** (never containing `dir` itself); the root entry `.` is excluded.
+   - **Exclusions** (relative to scenario root): `hints/` (the directory entry AND all descendants —
+     return `fs.SkipDir` on it), `solution.md`, `solution.sh`. Everything else participates,
+     including `scenario.yaml` and `checks/`.
+   - Entries sorted by relative slash-path ascending (byte order). Record encoding:
+     - directory: `rel_path` + `\x00` + `d` + `\x00`
+     - file: `rel_path` + `\x00` + class (`x` any exec bit, else `f`) + `\x00` + 8-byte big-endian
+       length + file bytes
+     (fs.FS without mode info → class `f`; bundled embed and os walks agree because the cookbook
+     keeps scripts non-executable — issue 12.)
+   - Non-regular entries (symlinks, devices, sockets — only possible on os-backed FS) → error
+     (callers validate first per issue 08 SV021; the hash refuses rather than guesses). Read/stat
+     failures → error (never a partial hash).
+   - Output: lowercase hex SHA-256; helper `Short(h string) string` returns the first 12 chars and
+     panics on input shorter than 64 hex chars (programming error, not runtime input).
 2. Determinism requirements: no timestamps, no absolute paths, no map iteration order.
 3. Golden vectors: commit a small `testdata/hashscn/` fixture and assert the exact hex digest in
    the test (so accidental algorithm changes fail loudly). Changing the algorithm later requires

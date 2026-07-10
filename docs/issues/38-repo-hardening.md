@@ -22,19 +22,37 @@ exact commands and marks which need the maintainer.
 ## Detailed Requirements
 
 1. `dependabot.yml`: weekly `gomod` (grouped minor+patch into one PR, majors separate) and weekly
-   `github-actions` updates; labels `deps`; open-pr limit 5.
-2. `codeql.yml`: language `go`; triggers: PR to main + weekly cron; SHA-pinned `github/codeql-action`
-   steps; `permissions: { contents: read, security-events: write }` job-scoped; default query suite.
-3. Secret protection (admin, via `gh api -X PATCH /repos/Saber5656/debugdungeon` payloads —
-   document exact JSON): enable secret scanning, push protection, private vulnerability reporting,
-   and dependency graph/Dependabot alerts. Each with a verify command (`gh api … --jq`).
-4. Branch protection: verify the existing main ruleset requires PRs and blocks force-push
-   (owner set this up previously); document current state via
-   `gh api /repos/:owner/:repo/rulesets` output pasted into the PR; require CI checks
-   (`lint`, `test`) as required status checks — add if absent (admin step).
+   `github-actions` updates; labels `deps` (create first: `gh label create deps --color 6f42c1 || true`);
+   open-pr limit 5.
+2. `codeql.yml`: language `go`; triggers: PR to main + push to main + weekly cron +
+   `workflow_dispatch` (so "green on main" is achievable immediately); ALL actions SHA-pinned with
+   version comments (checkout/setup included — issue 02's rule applies to every workflow);
+   `permissions: { contents: read, security-events: write }` job-scoped; default query suite.
+3. Secret protection (admin; exact commands — run by maintainer or with an admin token):
+   ```sh
+   gh api -X PATCH repos/Saber5656/debugdungeon \
+     -f security_and_analysis[secret_scanning][status]=enabled \
+     -f security_and_analysis[secret_scanning_push_protection][status]=enabled
+   gh api -X PUT repos/Saber5656/debugdungeon/private-vulnerability-reporting
+   gh api -X PUT repos/Saber5656/debugdungeon/vulnerability-alerts        # Dependabot alerts
+   # verify:
+   gh api repos/Saber5656/debugdungeon --jq '.security_and_analysis'
+   gh api repos/Saber5656/debugdungeon/private-vulnerability-reporting --jq '.enabled'
+   ```
+   (Endpoint shapes verified against current GitHub REST docs at implementation per C6; adjust if
+   the API moved, recording the replacement commands in `docs/security/repo-settings.md`.)
+4. Branch protection: VERIFY-ONLY for the existing main ruleset (PR-required, force-push blocked
+   — owner configured it); paste `gh api repos/Saber5656/debugdungeon/rulesets` output into the
+   PR. Required status checks (`lint`, `test`): if absent, this issue does NOT mutate rulesets —
+   it documents the exact UI/API change as a maintainer action item in repo-settings.md and the
+   verify command that must pass afterwards.
 5. Actions policy (settings): default workflow permissions = read-only; "Allow GitHub Actions to
-   create and approve pull requests" = off. Verify/set via
-   `gh api /repos/:owner/:repo/actions/permissions/workflow`.
+   create and approve pull requests" = off:
+   ```sh
+   gh api -X PUT repos/Saber5656/debugdungeon/actions/permissions/workflow \
+     -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+   gh api repos/Saber5656/debugdungeon/actions/permissions/workflow   # verify
+   ```
 6. Record final state: `docs/security/repo-settings.md` — table of control → state → verify command
    → date; audit (39) re-runs the verify column.
 
@@ -48,13 +66,15 @@ exact commands and marks which need the maintainer.
 
 ## Validation
 
-All `--jq` verify commands return expected values (paste outputs in PR); one intentionally-planted
-dummy secret push is BLOCKED by push protection (evidence, then removed — use a GitHub test token
-pattern like `ghp_` + filler that triggers detection without being real).
+All `--jq` verify commands return expected values (paste outputs in PR). Push-protection proof:
+on a throwaway branch `test/push-protection`, commit a file containing the GitHub-documented
+canary test secret pattern (a `ghp_`-prefixed 40-char dummy — NEVER a real credential), `git push`
+→ paste the rejection message → delete the branch and the local commit. Steps + cleanup recorded
+in repo-settings.md.
 
 ## Dependencies
 
-02.
+02, 03 (SECURITY.md whose reporting channel this issue enables — its fallback line is removed here).
 
 ## Non-goals
 

@@ -21,10 +21,21 @@ was installed from where (TB4 provenance), and we never auto-update.
 
 1. **Git install**: `pack install <git-url> [--ref <tag|branch|sha>]`:
    - Shell out to **system git** (document requirement git ≥ 2.30; `exec.LookPath` pre-flight,
-     friendly error if absent): `git clone --depth 1 [--branch <ref>] <url> <tmp>` then
-     `git rev-parse HEAD`; a full-sha `--ref` uses fetch-by-sha fallback (`git fetch origin <sha> && checkout`).
-   - URL allowlist: `https://` and `git@` SSH forms only; reject `file://`, `ext::`, other exotic
-     transports (arg-injection hygiene: always `--` separation, URL never interpreted as a flag; validate with a regex + `-c protocol.ext.allow=never`).
+     friendly error if absent). Ref resolution algorithm (exact):
+     - no `--ref` → `git clone --depth 1 -- <url> <tmp>` (default branch);
+     - branch/tag ref → `git clone --depth 1 --branch <ref> -- <url> <tmp>`;
+     - 40-hex full SHA → `git init <tmp> && git remote add origin <url> && git fetch --depth 1
+       origin <sha> && git checkout FETCH_HEAD`;
+     - short SHA (7–39 hex) → REJECTED with "use a full commit SHA, branch, or tag" (shallow
+       remotes can't resolve abbreviations reliably);
+     - unreachable/unknown ref → git's error surfaced sanitized, exit 1.
+     Always record `git rev-parse HEAD` as the provenance commit.
+   - URL allowlist (exact regexes, table-tested incl. injection attempts `--upload-pack=…`,
+     `ext::…`, `file://…`):
+     `^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._/-]+(\.git)?$` and scp-form
+     `^[A-Za-z0-9_.-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]+(\.git)?$`; everything else rejected.
+     Arg-injection hygiene: always `--` separation, URL never interpreted as a flag,
+     `-c protocol.ext.allow=never -c protocol.file.allow=never` on every invocation.
    - The cloned tree (minus `.git`) then flows through the EXACT pipeline of 59 (extraction rules
      become tree rules: symlink scan, quotas, validation, disclosure, typed-name confirm).
    - Provenance: `source: {kind:"git", ref:<url>, commit:<sha>, requested_ref:<ref|null>}`.
@@ -33,17 +44,24 @@ was installed from where (TB4 provenance), and we never auto-update.
    <reason>` for load-failing packs, from 10's skip-warn path), trust state (`accepted` /
    `not yet played` from provenance.accepted_at — 61 fills semantics).
 3. **`pack remove <name>`**: confirm (y/N; `--yes`); refuse while the active run references a
-   scenario from it (run store check) — message names the run; removal deletes the pack dir
-   atomically (rename to `.trash-<ts>` sibling then RemoveAll — no partial states); managed images
-   for its scenarios are NOT auto-removed (mention `clean --all`).
+   scenario from it (run store, 20) — message names the run. Removal semantics (exact): rename
+   pack dir to sibling `.trash-<ts>` (atomic — the pack is GONE from the registry's view at this
+   instant), then best-effort RemoveAll; "no partial state" means no partially-deleted
+   `packs/<name>/` is ever observable — a surviving `.trash-*` after a crash is expected and swept
+   at next CLI start (shared sweep with 59's --force). Managed images for its scenarios are NOT
+   auto-removed (mention `clean --all`).
 4. All subcommands work with Docker down.
-5. `git` invocations: 60s timeout, output captured to debug log, env scrubbed
-   (`GIT_ASKPASS=/bin/true`, `GIT_TERMINAL_PROMPT=0` — never prompt for creds; private repos fail fast with guidance).
+5. `git` invocations: 60s timeout, output captured to debug log, env scrubbed —
+   `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/bin/true`, AND
+   `GIT_SSH_COMMAND=ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new` (BatchMode is what
+   actually stops ssh passphrase/interactive prompts — review catch); private/authed repos
+   therefore fail fast with guidance.
 
 ## Acceptance Criteria
 
-- [ ] itest (local `file://`-free: use a local **bare repo served via `git daemon`? too heavy** → use a plain local path clone through the git kind by allowing `--allow-local-path-git` test-only flag, or construct an https-like fixture via `git init` + direct-dir install for the pipeline and unit-test the URL/arg handling separately) — REQUIRED minimum: unit tests for URL validation/arg construction (table incl. injection attempts `--upload-pack=…`, `ext::`, `file://`) + one end-to-end install from a local git repo via the test-only path, exercising commit pinning + provenance.
-- [ ] `pack list` golden (ok + broken + differing sources); `pack remove` refusal-while-active covered; trash-then-delete leaves no partial dir on injected failure.
+- [ ] Unit tests: URL regex table (accepts/rejects incl. `--upload-pack=…`, `ext::`, `file://`, short-SHA rejection); git arg construction golden.
+- [ ] itest end-to-end git install: a local bare repo fixture served over a REAL allowed transport in-process (`git daemon --export-all` on 127.0.0.1 with a `git://`… NO — keep allowlist intact: serve via `git http-backend` behind `httptest` (stdlib CGI handler) and install from `https://127.0.0.1:<port>/pack.git` with TLS via httptest's cert injected ONLY under the `testhooks` build tag as an extra root CA for the git process (`GIT_SSL_CAINFO` env set by the test). Exercises clone, commit pinning, provenance golden. If the http-backend route proves brittle at implementation, the documented fallback is a plain `http://127.0.0.1` allowance compiled ONLY under `testhooks` — never in release binaries (36's snapshot smoke asserts the flagless binary rejects it).
+- [ ] `pack list` golden (ok + broken + differing sources); `pack remove` refusal-while-active covered; crash between trash-rename and RemoveAll (injected) → next CLI start sweeps `.trash-*` (test asserts).
 - [ ] Credential prompts provably disabled (env asserted in tests).
 - [ ] Provenance golden for git kind (commit sha recorded).
 
@@ -53,7 +71,7 @@ was installed from where (TB4 provenance), and we never auto-update.
 
 ## Dependencies
 
-59 (20 for active-run check).
+20 (active-run check), 59.
 
 ## Non-goals
 

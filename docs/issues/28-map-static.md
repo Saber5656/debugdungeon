@@ -35,16 +35,24 @@ render; Wave 9 (64) upgrades it to an interactive TUI reusing this layout model.
    - Locked floors: header only (rooms hidden — mystery preserved).
    - `← you are here`: deepest unlocked floor; active run marks its room with `▶`.
    - Completion `✦` on fully-cleared floors.
-2. Data model: `ui.BuildMap(reg, prog, run, colors bool) string` pure function → golden-testable.
-3. Wrap room cells to terminal width (from `term.GetSize`; default 80 when unavailable); minimum
-   supported width 60 (below → simple list fallback = `list` hint message).
-4. Room ids in cells; titles appear in `list` (map stays scannable).
-5. Sanitization: ids are regex-safe by schema; titles not rendered here — no untrusted text besides
-   none (comment this).
+2. Data model: `ui.BuildMap(reg, prog, run, o MapOpts) string` pure function → golden-testable;
+   `MapOpts{Width int; Color, ASCII, FreeRoam bool}`. The CLI derives Width via `term.GetSize`
+   (default 80 when unavailable), ASCII = color-disabled (no separate flag — DESIGN §5.2 has only
+   `--no-color`/`NO_COLOR`), FreeRoam from config; floor names via `ui.FloorMeta` (27).
+3. Free-roam: all floors render unlocked (gating rows replaced by room cells) — matches DESIGN §3.5.
+4. Wrap room cells to `Width`; minimum supported width 60 (below → simple list fallback = `list`
+   hint message, exit 0).
+5. State glyph mapping (complete, color/ASCII pairs from `ui.Glyphs`): new `⬜`/`[ ]`, cleared
+   `✅`/`[x]`, given_up `🏳`/`[g]`, active-run room `▶`/`>` (overrides its base glyph), locked
+   floors render header-only (rooms hidden). Room ids in cells; titles appear in `list`.
+6. Sanitization: ids are regex-safe by schema; floor names are engine-owned constants; no other
+   scenario text is rendered (comment this).
+7. CLI wiring: read-only (no flock), works with corrupt progress via 26's quarantine path
+   (warning + fresh), exit 0 always except usage errors; stdout only.
 
 ## Acceptance Criteria
 
-- [ ] Golden renders: fresh player (only F1 visible unlocked), mid-game (mixed), all-clear (capstone visible), active-run marker, ASCII fallback, width-40 fallback message.
+- [ ] Golden renders: fresh player (only F1 visible unlocked), mid-game (mixed), all-clear (capstone visible), active-run marker, ASCII fallback, free-roam (all floors open), width-40 fallback message.
 - [ ] `map` exits 0 with no Docker running (no dockerx import — same arch test as 27).
 - [ ] Unlock requirement strings come from 26's `UnlockRequirementText` (no duplicated literals — grep test).
 
@@ -54,7 +62,7 @@ render; Wave 9 (64) upgrades it to an interactive TUI reusing this layout model.
 
 ## Dependencies
 
-10, 26.
+10, 20 (run marker), 26.
 
 ## Non-goals
 

@@ -23,19 +23,24 @@ experience. All game-loop UX text is born here.
    ("did you mean rusty-path?" — nearest by Levenshtein ≤ 3, else list hint).
 2. Gate: `progress.FloorUnlocked` (26) unless `free_roam`; locked → exit 7 with the unlock rule text.
 3. Active-run rules (§3.3): same id → resume (Reconcile; broken → offer reset guidance, exit 1);
-   different id → exit 1 with message; `--force` → abandon current (stop+remove container,
-   Clear run; progress untouched, NO solution reveal) after y/N confirm, then proceed.
+   different id → exit 1 with message; `--force` → FIRST validate the target (id resolves, floor
+   unlocked) and only then confirm y/N and abandon the current run (stop+remove container, Clear
+   run; progress untouched, NO solution reveal) — never abandon before the target is known-startable.
 4. Fresh start sequence (each step logged; failure unwinds: remove container if created; state
    mutations wrapped in short `WithLock` sections (20) — the lock is NOT held during the
    interactive session):
    `EnsureImage` (14; while building show spinner line
    `Forging this room for the first time… (docker build, may take a few minutes)`; `built=false` → skip message)
-   → `CreateRoom` (15) → `InjectHelpers` (18; motd = banner bytes) → `StartRoom` → Save Run
-   (state running) → banner → loop.
-5. Banner (host-side, stdout; also injected as motd by 18): room title, floor/room position,
-   difficulty stars, lock names (closed as `[lock-name]`), hints used `n/m`, lore paragraph
-   (sanitized), instruction line
-   `Type escape to attempt escape · hint for a hint · giveup to abandon (absolute: /dungeon/bin/escape)`.
+   → Save Run `creating` (container_id empty; 20's sequencing rule) → `CreateRoom` (15) → save
+   container_id → `InjectHelpers` (18; motd = banner bytes) → `StartRoom` → save state `running`
+   → banner (host prints it exactly once here; re-entries rely on 18's `DD_REENTRY` motd — the
+   single-render contract) → loop.
+5. Banner (host-side, stdout; same bytes injected as motd by 18): room title, floor/room position,
+   difficulty stars, lock names, hints used `n/m`, lore paragraph — **every scenario-sourced field
+   passes textsafe (title/lock names SanitizeInline, lore Sanitize; CONVENTIONS C7)** — and the
+   instruction line
+   `Type escape to attempt escape · hint for a hint · giveup to abandon`
+   `(PATH-proof absolutes: /dungeon/bin/escape · /dungeon/bin/hint · /dungeon/bin/giveup)`.
 6. Session loop:
    ```
    for {
@@ -64,7 +69,7 @@ experience. All game-loop UX text is born here.
 - [ ] Unit: dispatch table for all five outcome kinds; `--force` flow clears old run and container.
 - [ ] Gating: locked floor → exit 7 + rule text; free_roam bypass covered.
 - [ ] Unknown id → exit 4 with suggestion (test with typo fixture).
-- [ ] itest: full loop against `_template` fixture — play, in-shell `escape` with a failing lock (message shown, shell re-entered), fix, `escape` → victory path reached (assert via 22's hook mock or real progress file).
+- [ ] itest: loop mechanics against a fixture room — play, in-shell `escape` dispatches into the Evaluate branch (mocked until 22 merges; finalized as a real full-loop test in 22's itest), `hint` branch prints and re-enters, plain `exit` pauses with the resume message.
 
 ## Validation
 
@@ -72,7 +77,12 @@ experience. All game-loop UX text is born here.
 
 ## Dependencies
 
-10, 14, 15, 16, 17, 18, 20, 26 (and functions from 22/23/25 — implement behind interfaces first if those issues land later; plan order puts 22–26 alongside).
+10, 14, 15, 16, 17, 18, 20, 26. The loop dispatches into `game.Evaluate`/`Victory` (22),
+`RevealNextHint` (23), and `GiveUp` (25): those land in the SAME wave right after this issue
+(ISSUE_PLAN ordering note); until each merges, `play` wires the corresponding branch to a typed
+`errNotImplemented` stub behind the `game` package interface, and this issue's full-loop itest is
+finalized by 22. Also exposes `cli.RunPlay(ctx, deps, scenarioID string, opts PlayOpts) error` as
+the reusable entry point (consumed by the TUI map, issue 64).
 
 ## Non-goals
 

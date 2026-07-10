@@ -68,15 +68,25 @@ under the fixed container profile) so content authors don't design infeasible ro
 14. **Submission checklist** (copy into content PRs): validator green, `scenario test` green both
     arches, size within budget, hints escalate, solution.md has Lesson Learned, lore sanitized-safe.
 
-`scenarios/_template/`: complete runnable example ("hello-room": one trivial lock, one hint) with
-commented `scenario.yaml`, `image/Dockerfile` (ARG BASE pattern), `image/dungeon-boot.sh`,
-`checks/example.sh` (MSG pattern + retry snippet), `hints/01.md`, `solution.md`, `solution.sh`.
+`scenarios/_template/`: a complete example room ("hello-room") with exactly these files and behaviors:
+- `scenario.yaml` (commented): id `_template`-independent placeholder `hello-room`, floor 1, ★1,
+  topics `[basics]`, time 10, one lock `door-open` → `checks/door.sh` timeout 10, one hint,
+  standard solution refs.
+- `image/Dockerfile`: `ARG BASE` pattern; until issue 30 records the pinned digest in COOKBOOK §2,
+  it uses the plain `debian:bookworm-slim` tag with a `# TODO(issue 30): pin digest per COOKBOOK §2`
+  comment — the template is **structural + validate-clean at this issue; build/solvability proof
+  is issue 29's template AC**, not this issue's.
+- `image/dungeon-boot.sh`: reference boot pattern (creates `/var/dungeon/DOOR-CLOSED` marker as
+  the breakage, writes `/var/dungeon/boot-ok` last, `exec sleep infinity`).
+- `checks/door.sh`: `[ ! -e /var/dungeon/DOOR-CLOSED ]` with `MSG:` + a commented retry-deadline
+  snippet; `hints/01.md`; `solution.md`; `solution.sh` (`rm -f /var/dungeon/DOOR-CLOSED`).
 
 ## Acceptance Criteria
 
 - [ ] COOKBOOK.md contains all 14 sections above with concrete commands/snippets (not prose-only).
 - [ ] `_template` passes `ValidateDir` (08) with zero violations (test added in this issue).
-- [ ] Template Dockerfile uses the `ARG BASE` digest pattern and builds FROM bookworm-slim (digest placeholder documented as "set in issue 30").
+- [ ] §2 documents the shared-digest consumption convention explicitly: every bundled Dockerfile's first two lines are the `ARG BASE=…@sha256:<digest>` / `FROM ${BASE}` pair copied from COOKBOOK §2 (the cookbook IS the single source; no code artifact needed).
+- [ ] Template Dockerfile uses the `ARG BASE` pattern with the documented TODO-digest state.
 - [ ] Infeasible list names the exact missing capability for each item (matches DESIGN §7.4 CapAdd set).
 
 ## Validation

@@ -21,20 +21,32 @@ streak-ish facts) need an append-only history. Feeds achievements (63). Zero tel
 
 ## Detailed Requirements
 
-1. History file `<state>/history.jsonl` (0600), one JSON object per line:
-   `{v:1, run_id, scenario_id, source, outcome:"cleared"|"given_up"|"abandoned", elapsed_sec, hints, resets, ended_at}`.
-   - `AppendRun(paths, rec)` — O_APPEND single write (atomic enough per-line; partial trailing
-     line tolerated on read: skip + debug-log).
-   - Rotation: when > 10,000 lines at append time, keep newest 5,000 (rewrite via temp+rename).
-   - Writers: victory (22) `cleared`, give-up (25) `given_up`, play `--force` abandon (21) `abandoned`.
-2. `stats` command (read-only over history + progress + registry):
-   - Overview block: rooms cleared X/Y, give-ups, total attempts (history lines), total time in
-     dungeon (sum elapsed of cleared), hints used (sum), resets (sum).
-   - Per-floor table: floor, cleared a/b, avg clear time, avg hints (cleared runs only).
-   - Records block: fastest clear (room, mm:ss), most-attempted room, no-hint clears count.
+1. History file `<state>/history.jsonl` (0600; path = `Paths.HistoryFile` from 05), one JSON
+   object per line — `RunRecord` contract (types explicit):
+   `{V int(=1); RunID, ScenarioID, Source string; Outcome string("cleared"|"given_up"|"abandoned");`
+   `ElapsedSec int (run-start→terminal for ALL outcomes, §9 rule 2 clock); Hints, Resets int;`
+   `EndedAt string (RFC3339 UTC)}`. Unknown/invalid Outcome or negative numbers on read → line
+   skipped as corrupt.
+   - `AppendRun(paths, rec)` — O_APPEND single write. Concurrency: all three writers already
+     execute inside the terminal-state flows which run under `game.WithLock` (20) — appends and
+     the rotation rewrite happen under that lock; `stats` reads a snapshot without the lock
+     (torn/partial trailing line tolerated: skip + debug-log).
+   - Rotation: when > 10,000 lines at append time, keep newest 5,000 (temp+rename, under the lock).
+   - Writers: victory (22) `cleared`, give-up (25) `given_up`, play `--force` abandon (21) `abandoned` — one call each.
+2. `stats` command (read-only over history + progress + registry) — deterministic rules:
+   - Overview block: rooms cleared X/Y (X = distinct cleared ids present in the registry; Y =
+     registry size), give-ups (count of given_up records), total attempts (valid history lines),
+     total time (sum ElapsedSec of cleared records), hints used (sum, all records), resets (sum).
+   - Per-floor table: floor, cleared a/b (distinct/registry), avg clear time + avg hints over
+     cleared records of that floor (missing data → `—`).
+   - Records block: fastest clear (min ElapsedSec; tie → lexically first scenario id),
+     most-attempted room (max record count; same tie rule), no-hint clears count.
+   - Scenario titles rendered from the REGISTRY (sanitized per C7); history-only orphan ids
+     (uninstalled packs) count in overview totals, are excluded from per-floor and records blocks
+     (documented in the command help).
    - Empty history → friendly "The chronicle is empty — go break something (then fix it)." exit 0.
-3. All aggregate math table-driven-tested against a fixture history; unknown scenario ids in
-   history (uninstalled packs) count in totals but not per-floor rows (documented).
+3. All aggregate math table-driven-tested against a fixture history (mixed outcomes, orphan ids,
+   corrupt line, tie cases).
 4. Corrupt line policy: skip + count, `--verbose` prints skipped count.
 
 ## Acceptance Criteria
@@ -43,7 +55,7 @@ streak-ish facts) need an append-only history. Feeds achievements (63). Zero tel
 - [ ] Rotation at threshold proven (10k+1 → 5k newest kept, order preserved).
 - [ ] `stats` golden: fixture with mixed outcomes + orphan pack ids + corrupt line; empty state.
 - [ ] History file 0600; no Docker imports (works offline).
-- [ ] Elapsed math consistent with §9.2 clock (history stores the same elapsed as the victory banner — cross-checked in an itest).
+- [ ] Elapsed math consistent with DESIGN §9 rule 2 (history stores the same elapsed as the victory banner — cross-checked in an itest).
 
 ## Validation
 
@@ -51,7 +63,7 @@ streak-ish facts) need an append-only history. Feeds achievements (63). Zero tel
 
 ## Dependencies
 
-20, 22, 26 (25 for the give-up hook).
+20, 21 (abandon hook), 22 (victory hook), 25 (give-up hook), 26.
 
 ## Non-goals
 

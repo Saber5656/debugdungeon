@@ -2,8 +2,10 @@
 
 Status: Draft for review (2026-07-10)
 Normative source for scope/waves/order. Each issue's full specification lives in
-`docs/issues/NN-short-title.md`; GitHub Issues are derived from those files and are stale the
-moment they disagree with this repo.
+`docs/issues/NN-short-title.md`, read under the shared conventions in
+`docs/issues/CONVENTIONS.md` (API exactness, scenario-file defaults, dependency semantics,
+validation phrasing). GitHub Issues are derived from those files and are stale the moment they
+disagree with this repo.
 
 ---
 
@@ -116,44 +118,44 @@ Type: `eng` engineering, `scn` scenario content, `sec` security-critical, `doc` 
 | 07 | 01 |
 | 08 | 07 |
 | 09 | 07 |
-| 10 | 07, 08, 09 |
+| 10 | 04, 07, 08, 09 |
 | 11 | 01 |
 | 12 | 07, 08 |
 | 13 | 04, 05, 06 |
-| 14 | 09, 10, 13 |
-| 15 | 13 |
+| 14 | 09, 10, 11, 13 |
+| 15 | 07, 13 |
 | 16 | 15 |
 | 17 | 13, 15 |
 | 18 | 11, 15 |
-| 19 | 11, 13, 15 |
-| 20 | 05, 06, 13 |
-| 21 | 10, 14, 15, 16, 17, 18, 20, 26 |
-| 22 | 19, 20, 26 |
+| 19 | 10, 11, 13, 15 |
+| 20 | 05, 06, 13, 16, 19 |
+| 21 | 10, 14, 15, 16, 17, 18, 20, 26 (22/23/25 land in the same wave — see ordering note) |
+| 22 | 19, 20, 21, 26 |
 | 23 | 10, 11, 20 |
-| 24 | 15, 20 |
-| 25 | 10, 11, 20, 26 |
+| 24 | 10, 14, 15, 18, 20 |
+| 25 | 10, 11, 20, 23, 26 |
 | 26 | 05, 10 |
-| 27 | 10, 20, 26 |
-| 28 | 10, 26 |
-| 29 | 02, 10, 14, 15, 19 |
+| 27 | 10, 11, 20, 26 |
+| 28 | 10, 20, 26 |
+| 29 | 02, 10, 12, 14, 15, 18, 19 |
 | 30–33 | 12, 29, (21, 22 for manual QA) |
-| 34 | 02, 21, 22, 30 |
+| 34 | 02, 21, 22, 23, 27, 30 |
 | 35 | 02, 08, 11, 15, 19 |
 | 36 | 01, 02, 04 |
-| 37 | 21–28, 30, 36 |
-| 38 | 02 |
+| 37 | 21–28, 30, 35, 36 |
+| 38 | 02, 03 |
 | 39 | 35, 36, 37, 38 |
 | 40–55 | 12, 29 (44, 45 additionally exercise tmpfs mounts from 07/15) |
-| 56 | 07, 08, 12 |
-| 57 | 08, 29 |
-| 58 | 12, 56, 57 |
+| 56 | 07, 08, 10, 12, 29 |
+| 57 | 08, 10, 11, 13, 29 |
+| 58 | 12, 56, 57 (pack section ships as a stub; completed by 61) |
 | 59 | 05, 08, 10, 11 |
-| 60 | 59 |
-| 61 | 21, 27, 59, 60 |
-| 62 | 20, 22, 26 |
-| 63 | 26, 62 |
-| 64 | 26, 28 |
-| 65 | 10, 18, 22 |
+| 60 | 20, 59 |
+| 61 | 21, 27, 28, 58, 59, 60 |
+| 62 | 20, 21, 22, 25, 26 |
+| 63 | 22, 26, 62 |
+| 64 | 21, 26, 28, 34 |
+| 65 | 10, 18, 21, 22, 25, 27, 28, 63 |
 | 66 | 04, 05 |
 
 Wave-level dependency sketch:

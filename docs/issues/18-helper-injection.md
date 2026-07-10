@@ -1,6 +1,6 @@
 # Title
 
-In-container helper injection: escape/hint/giveup, banner, PATH and history wiring
+In-container helper injection: escape/hint/giveup, banner, PATH wiring
 
 ## Summary
 
@@ -20,20 +20,26 @@ time keeps scenario images clean (no engine files in content, DESIGN §6.6 spoil
 ## Detailed Requirements
 
 1. `InjectHelpers(ctx, api, containerID string, motd []byte) error` — builds an in-memory tar and
-   `CopyToContainer(containerID, "/", tar)`. Entries (all uid/gid 0, mtime zeroed):
-   - `/dungeon/bin/escape` 0755: `#!/bin/sh\nexit 42\n`
-   - `/dungeon/bin/hint` 0755: `#!/bin/sh\nexit 43\n`
-   - `/dungeon/bin/giveup` 0755: `#!/bin/sh\nexit 44\n`
-   - `/dungeon/motd` 0644: the `motd` bytes — caller MUST pass already-sanitized content (11);
-     defensive `textsafe.Sanitize` applied here too (chokepoint duplication is intended).
-   - `/etc/profile.d/zz-debugdungeon.sh` 0644:
+   `CopyToContainer(ctx, containerID, "/", tar, container.CopyToContainerOptions{})` (add this
+   method to `dockerx.API` per CONVENTIONS C2). Tar layout: RELATIVE header names with explicit
+   directory entries `dungeon/` 0755, `dungeon/bin/` 0755, `etc/profile.d/` 0755, then files
+   (all uid/gid 0, mtime zeroed):
+   - `dungeon/bin/escape` 0755: `#!/bin/sh\nexit 42\n`
+   - `dungeon/bin/hint` 0755: `#!/bin/sh\nexit 43\n`
+   - `dungeon/bin/giveup` 0755: `#!/bin/sh\nexit 44\n`
+   - `dungeon/.motd` 0644 (DESIGN §7.6 path): `textsafe.Sanitize(string(motd), 4096)` bytes —
+     caller passes already-sanitized content (11); the defensive re-sanitize here is intended
+     chokepoint duplication.
+   - `etc/profile.d/zz-debugdungeon.sh` 0644:
      ```sh
      PATH="/dungeon/bin:$PATH"; export PATH
-     if [ -n "$DEBUGDUNGEON" ] && [ -z "$DD_MOTD_SHOWN" ] && [ -f /dungeon/motd ]; then
-       cat /dungeon/motd
-       DD_MOTD_SHOWN=1; export DD_MOTD_SHOWN
+     if [ -n "$DEBUGDUNGEON" ] && [ -n "$DD_REENTRY" ] && [ -f /dungeon/.motd ]; then
+       cat /dungeon/.motd
      fi
      ```
+     Banner de-duplication contract (with issue 21): the HOST prints the full banner exactly once
+     per `play` invocation before the first shell; re-entry exec sessions (after hint/failed
+     escape) set `DD_REENTRY=1` in the exec Env, so the in-container motd prints then and only then.
 2. Ordering contract: called after `CreateRoom`, before `StartRoom` (works on created containers;
    test this — no exec needed).
 3. Failure handling: any error → typed `ErrInjectFailed` (play aborts and removes the container; wiring in 21).
@@ -42,12 +48,16 @@ time keeps scenario images clean (no engine files in content, DESIGN §6.6 spoil
    paths. `profile.d` only affects login shells of bash/ash-compatible shells; entry.shell default
    is bash `-l` (17). Cookbook forbids scenarios touching `/dungeon` (12).
 5. No other files, no scenario-specific logic here.
+6. Forward-compat note: issue 65 (ambience) later widens this signature to
+   `InjectHelpers(ctx, api, containerID, InjectOpts{Motd, RoomID, Color})` to add PS1 theming.
+   v1 MVP ships the `motd []byte` form above; keep the profile.d snippet in one easily-extended
+   place so 65's change is additive.
 
 ## Acceptance Criteria
 
-- [ ] Unit: tar layout golden test (paths, modes, contents byte-exact; motd sanitization applied).
-- [ ] itest: create room → inject → start → `exec cat /dungeon/motd` matches; `exec sh -lc 'command -v escape'` → `/dungeon/bin/escape`; `exec sh -lc 'escape'; echo $?` shell exits 42 (via non-TTY exec of `sh -lc "escape"` and inspecting exit code).
-- [ ] itest: second login shell in same container does not re-print motd (DD_MOTD_SHOWN export) — single-session scope acceptable; assert via `sh -lc 'true'` output empty when var pre-set.
+- [ ] Unit: tar layout golden test (relative paths, dir entries, modes, contents byte-exact; motd sanitization applied).
+- [ ] itest: create room → inject → start → `exec cat /dungeon/.motd` matches; `exec /bin/bash -lc 'command -v escape'` → `/dungeon/bin/escape`; non-TTY exec of `/bin/bash -lc escape` inspects exit code 42.
+- [ ] itest: `bash -l` WITHOUT `DD_REENTRY` prints nothing extra; with `DD_REENTRY=1` in Env it prints the motd (banner-dedup contract).
 - [ ] Injection into a created-but-not-started container succeeds.
 
 ## Validation

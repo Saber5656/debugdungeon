@@ -15,8 +15,7 @@ ADR-002/007). Research doc risk 3: Docker-prereq friction must be absorbed by do
 ## Scope
 
 - `README.md` (rewrite), `docs/PLAYING.md`, `tools/demo.tape` (vhs script) + committed GIF
-- Small `docs/` index touch-ups
-- Not: authoring docs (58), website
+- Not: authoring docs (58), website, changes to design docs
 
 ## Detailed Requirements
 
@@ -24,13 +23,17 @@ ADR-002/007). Research doc risk 3: Docker-prereq friction must be absorbed by do
    - Hero: one-paragraph pitch + the demo GIF.
    - Quickstart: brew install → `debugdungeon doctor` → `play welcome-cell` (3 commands, copy-paste).
    - "What it is": floors table (from DESIGN §3.5, summarized), 60-second gameplay explanation.
-   - **Security & privacy box** (verbatim commitments): runs rooms as hardened local containers
-     (link DESIGN §7.4); CLI makes zero network calls (ADR-007); first build pulls a pinned base
-     image via Docker; uninstall leaves nothing behind except what `clean --all` + state-dir removal covers.
+   - **Security & privacy box** (verbatim commitments, each linking its enforcing artifact):
+     runs rooms as hardened local containers (link DESIGN §7.4 + the profile golden test from 35);
+     **no implicit network I/O by DebugDungeon** — Docker pulls pinned base images on first build,
+     and that is the only network activity in the MVP (ADR-007 / DESIGN §10.8 wording, NOT "zero
+     network calls"); uninstall leaves nothing behind except what `clean --all` + state-dir removal covers.
    - Requirements: Docker Desktop/OrbStack/colima (macOS), docker-ce (Linux), WSL2 note (KU-3).
    - Install alternatives: tarball + checksum verify, `gh attestation verify` one-liner, `go install`.
-   - Comparison sentence(s) with adjacent tools ONLY after re-verifying claims (research doc
-     caveat) — verification results recorded in PR.
+   - Comparison sentence(s) limited to the three named adjacent products in
+     docs/research/comparative-landscape.md (SadServers, OverTheWire, iximiuz Labs) and ONLY after
+     re-verifying each claim against the product's current public site — per-claim verification
+     (URL + date + what was checked) recorded in the PR description.
    - Contributing/scenario-authoring pointers, license badge, CI badges.
 2. `docs/PLAYING.md`:
    - Full command reference (mirrors DESIGN §5.1 table, player-voice).
@@ -47,7 +50,9 @@ ADR-002/007). Research doc risk 3: Docker-prereq friction must be absorbed by do
 
 ## Acceptance Criteria
 
-- [ ] Fresh-eyes test: a person/agent following only README on a clean macOS VM reaches victory in welcome-cell (transcript or recording as evidence).
+- [ ] Fresh-eyes test: following ONLY the README in a clean environment (fresh macOS VM, pristine
+  macOS user account, or clean Linux container/VM with Docker — any one; environment named in the
+  evidence) from install through welcome-cell victory; transcript or recording attached.
 - [ ] GIF renders on GitHub, ≤ 3 MB; tape file committed and re-runnable.
 - [ ] Security box claims each link to their enforcing artifact (profile golden test, ADR-007, attestation docs).
 - [ ] PLAYING.md covers every §5.1 MVP command; uninstall section matches §8.1 paths exactly.
@@ -59,7 +64,7 @@ Markdown link check (lychee or manual); fresh-environment quickstart evidence; `
 
 ## Dependencies
 
-21–28, 30, 36.
+21–28, 30, 35 (security-gate artifacts the README links), 36.
 
 ## Non-goals
 

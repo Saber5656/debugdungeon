@@ -23,14 +23,18 @@ repair (not `chmod 777`). DESIGN §14 Floor 1 row 3.
    - `scribe-reads` / `The scribe can read the scroll`
    - `not-world-readable` / `The scroll is not left open to all`
    - `heartbeat-fresh` / `The scriptorium breathes`
-2. Dockerfile:
-   - Create user `scribe` (system user, home `/home/scribe`).
+2. Dockerfile (C3 preamble; verify `su` present in the base — it is in bookworm-slim via
+   util-linux/login; if a slimmer base ever drops it, the build must fail loudly with
+   `RUN command -v su`):
+   - Create group + user: `groupadd -r scribe && useradd -r -m -d /home/scribe -g scribe -s /bin/sh scribe`.
    - `/etc/scroll/config.yaml` (content: a few yaml keys incl `phrase: lumen-in-tenebris`),
      owner `root:root`, mode `0600`; dir `/etc/scroll` mode `0700 root:root` (double fault).
    - Service `/usr/local/bin/scrolld` (sh): loop as scribe — reads the config's `phrase`, writes it
      + timestamp to `/var/run/scroll/heartbeat` every 5s; `/var/run/scroll` owned `scribe`, 0755.
-   - Boot script: start `su -s /bin/sh scribe -c scrolld &` style loop (respawn wrapper), boot-ok, sleep infinity.
-     While perms are broken, scrolld logs `permission denied` to `/var/log/scrolld.log` (visible symptom trail).
+   - Boot script (C3 contract): respawn loop
+     `while true; do su -s /bin/sh scribe -c /usr/local/bin/scrolld >>/var/log/scrolld.log 2>&1; sleep 3; done &`
+     (absolute scrolld path — no PATH reliance), then boot-ok marker, `exec sleep infinity`.
+     While perms are broken, scrolld logs `permission denied` lines (visible symptom trail).
 3. Checks:
    - `scribe-reads.sh`: `su -s /bin/sh scribe -c 'cat /etc/scroll/config.yaml' >/dev/null 2>&1`
      else `MSG: The scribe still cannot read the scroll (permission denied).`
@@ -55,7 +59,9 @@ repair (not `chmod 777`). DESIGN §14 Floor 1 row 3.
 
 ## Validation
 
-`make itest-scenarios DD_SCENARIO_FILTER=forbidden-scroll`; transcripts in PR.
+`debugdungeon scenario`-less path: `go test`-driven `ValidateDir` fixture check +
+`make itest-scenarios DD_SCENARIO_FILTER=forbidden-scroll` (both arches per C5); transcripts in
+PR: intended path, `chmod 777` trap (third lock MSG shown), heartbeat recovery timing.
 
 ## Dependencies
 

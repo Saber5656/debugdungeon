@@ -20,13 +20,13 @@ sets `BASE` digest in the cookbook (12 left it as a placeholder).
 
 ## Detailed Requirements
 
-1. `scenario.yaml`: id `welcome-cell`, floor 1, difficulty 1, topics `[basics, filesystem]`,
-   time_estimate_min 10, defaults for entry (root/bash//root — workdir `/root`), network none,
-   default resources. Lore (≤ 600 chars), e.g.: awakening in a cell; a note on the floor; the
-   stone that seals the door is cursed; light the torch and remove the stone to walk free.
-   Locks:
-   - `stone-removed` / name `The sealing stone is gone` / `checks/stone.sh` / timeout 10
-   - `torch-lit` / name `The torch is lit` / `checks/torch.sh` / timeout 10
+1. `scenario.yaml` (per CONVENTIONS C3, from `_template`): id `welcome-cell`, floor 1,
+   difficulty 1, topics `[basics, filesystem]`, time_estimate_min 10, defaults for entry
+   (root / /bin/bash / workdir `/root`), network none, default resources. Lore (≤ 600 chars):
+   awakening in a cell; a note on the floor; the stone that seals the door is cursed; light the
+   torch and remove the stone to walk free. Locks (DESIGN §14 row):
+   - `stone-removed` / name `The sealing stone is gone` / `checks/stone-removed.sh` / timeout 10
+   - `torch-lit` / name `The torch is lit` / `checks/torch-lit.sh` / timeout 10
 2. `image/Dockerfile` (pattern per cookbook; breakage in one layer):
    - `ARG BASE=debian:bookworm-slim@sha256:<digest>` — implementer picks the current multi-arch
      manifest digest, verifies it resolves on amd64 AND arm64 (`docker buildx imagetools inspect`),
@@ -38,14 +38,17 @@ sets `BASE` digest in the cookbook (12 left it as a placeholder).
      instructions teaching: look around (`ls`), read (`cat`), the three game commands, and the two
      tasks — `rm /var/dungeon/LOCKED` and `echo lit > /var/dungeon/torch`. Explicit spoilers are
      CORRECT here (tutorial).
-   - `image/dungeon-boot.sh`: writes `/var/dungeon/boot-ok`, `exec sleep infinity`. ENTRYPOINT it.
-3. `checks/stone.sh`:
+   - `image/dungeon-boot.sh` (COPY + `ENTRYPOINT ["/dungeon-boot.sh"]`, mode 0755, `#!/bin/sh`):
+     standard boot contract (C3) — `mkdir -p /var/dungeon && touch /var/dungeon/boot-ok` then
+     `exec sleep infinity`.
+3. `checks/stone-removed.sh`:
    ```sh
    if [ -e /var/dungeon/LOCKED ]; then echo "MSG: The sealing stone still blocks the door."; exit 1; fi
    exit 0
    ```
-4. `checks/torch.sh`: `/var/dungeon/torch` must exist and contain `lit`
+4. `checks/torch-lit.sh`: `/var/dungeon/torch` must exist and contain `lit`
    (grep -qx allowed; MSG: `The cell is pitch dark. The note mentioned a torch…`).
+   (DESIGN §14 lists exactly these two locks — the tutorial teaches read/remove/create verbs.)
 5. `hints/01.md`: look around with `ls`, read the note with `cat /root/READ-ME-FIRST.txt`.
    `hints/02.md`: the exact two commands. (2 hints total — tutorial.)
 6. `solution.md`: symptom recap, the two commands, Lesson Learned (filesystem verbs; the game
@@ -67,7 +70,9 @@ sets `BASE` digest in the cookbook (12 left it as a placeholder).
 
 ## Dependencies
 
-12, 29 (playable end-to-end needs 21/22 — manual QA notes may use the harness alone if the loop isn't merged yet).
+12, 29 (playable end-to-end needs 21/22; the `list`/`hint` transcript items additionally use
+23/27 — when those are unmerged, harness evidence + lock-level transcripts suffice and the manual
+playthrough is completed in issue 34's E2E).
 
 ## Non-goals
 

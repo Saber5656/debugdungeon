@@ -49,13 +49,19 @@ parse layer is a security requirement (DESIGN §10.4: no silent capability creep
    type Mounts struct{ Tmpfs []TmpfsMount `yaml:"tmpfs"` }
    type TmpfsMount struct{ Path string; SizeMB int `yaml:"size_mb"`; NrInodes int `yaml:"nr_inodes"` }
    ```
-2. `LoadSpec(fsys fs.FS, dir string) (*Spec, error)` reads `<dir>/scenario.yaml` (≤ 64 KiB cap,
-   larger → error) and decodes with `yaml.v3` `Decoder.KnownFields(true)`. Any unknown field, type
-   mismatch, or duplicate key is an error carrying file path + yaml line where available.
-3. `ApplyDefaults(*Spec)` (called by LoadSpec): `entry.user=root`, `entry.shell=/bin/bash`,
-   `entry.workdir=/root`, `build.context=./image`, per-lock `timeout_sec=10`,
-   `resources={memory_mb:512, cpus:1.0, pids:256}`, `network=none`. Defaults must not overwrite
-   explicit values, including explicit zeros being invalid later (08's job).
+2. `LoadSpec(fsys fs.FS, dir string) (*Spec, error)` reads `path.Join(dir, "scenario.yaml")`
+   (`dir` must satisfy `fs.ValidPath` — reject absolute or `..`; ≤ 64 KiB cap, larger → error
+   whose text contains `scenario.yaml` and `64 KiB`) and decodes with `yaml.v3`
+   `Decoder.KnownFields(true)`. Additionally, a pre-decode `yaml.Node` walk rejects duplicate
+   mapping keys at every nesting level (KnownFields alone doesn't) with key name + line.
+   Error contract: path always present; yaml line for parse/decode/duplicate errors; size/read
+   errors carry path + reason only.
+3. **Omitted-vs-zero handling**: decode into an internal raw struct using pointer fields for every
+   defaultable scalar (`*int`, `*float64`, `*string`), then convert to the value-typed `Spec`,
+   defaulting only nil pointers: `entry.user=root`, `entry.shell=/bin/bash`, `entry.workdir=/root`,
+   `build.context=./image`, per-lock `timeout_sec=10`,
+   `resources={memory_mb:512, cpus:1.0, pids:256}`, `network=none`. Explicit zeros survive into
+   `Spec` so the validator (08) rejects them (`timeout_sec: 0` must NOT silently become 10).
 4. No filesystem access beyond `scenario.yaml` in this issue. No validation beyond decode.
 5. Errors are wrapped `fmt.Errorf("scenario %s: ...", dir, ...)` style; map to exit code 4 at CLI layer later.
 
@@ -63,7 +69,8 @@ parse layer is a security requirement (DESIGN §10.4: no silent capability creep
 
 - [ ] Golden test: a fully-populated manifest round-trips into the expected struct.
 - [ ] Defaults test: minimal manifest yields the documented defaults.
-- [ ] Rejection tests: unknown top-level field, unknown nested field (`entry.uzer`), wrong type (`floor: "one"`), duplicate key, file > 64 KiB — each yields a distinct error containing the offending name.
+- [ ] Rejection tests: unknown top-level field, unknown nested field (`entry.uzer`), wrong type (`floor: "one"`), duplicate key (top-level AND nested), file > 64 KiB — each yields a distinct error containing the offending name (oversize: contains `scenario.yaml` + `64 KiB`).
+- [ ] Explicit-zero test: `timeout_sec: 0` and `memory_mb: 0` survive as 0 in `Spec` (not defaulted).
 - [ ] `LoadSpec` works against both `embed.FS` and `os.DirFS` (test both).
 
 ## Validation

@@ -22,14 +22,27 @@ throughout. DESIGN §14 Floor 4 row 1.
 
 1. `scenario.yaml`: id `dns-demon`, floor 4, difficulty 3, topics `[dns, network, config]`,
    time_estimate_min 25. Install `curl`, `netcat-openbsd`, `libc-bin` tools (getent present in base). Locks:
-   - `name-resolves` / `vault.internal answers to its true name` — `getent hosts vault.internal`
-     yields `127.0.0.1` (exact match; MSG hints at getent).
+   - `name-resolves` / `vault.internal answers to its true name` — TWO conditions (the review
+     caught that hosts-only fixes must not pass): (a)
+     `getent hosts vault.internal | awk '{print $1}' | sort -u` outputs exactly `127.0.0.1`;
+     (b) `/etc/nsswitch.conf`'s `hosts:` line lists `files` before any `dns` (or has no `dns`).
+     Timeout 15. MSG names whichever condition failed.
    - `courier-delivers` / `The courier completes a delivery` — `curl -fsS http://vault.internal:9000/health`
      returns `VAULT_OK` (retries; app binds 127.0.0.1:9000).
-   - `no-lingering-curse` / `No cursed entries remain` — `/etc/hosts` contains no entry mapping
-     `vault.internal` to anything other than 127.0.0.1 and no duplicate conflicting lines.
-2. Dockerfile + boot:
-   - `vaultd` (nc-loop HTTP-ish on 127.0.0.1:9000 answering `VAULT_OK` to /health) started by boot.
+   - `no-lingering-curse` / `No cursed entries remain` — exact parse of `/etc/hosts`: strip
+     comments (`#` to EOL), tokenize whitespace; every line whose alias tokens include
+     `vault.internal` must have address field `127.0.0.1`; IPv6 `::1` lines mentioning it are
+     acceptable; duplicate identical `127.0.0.1` lines acceptable. Any other address → CLOSED.
+     Timeout 10.
+2. Dockerfile + boot (C3 preamble; apt adds `netcat-openbsd` for the nc loop):
+   - `vaultd` (`/usr/local/bin/vaultd`, exact reference loop — flags verified at implementation
+     against bookworm's netcat-openbsd):
+     ```sh
+     #!/bin/sh
+     RESP='HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\nVAULT_OK'
+     while true; do printf "$RESP" | nc -l 127.0.0.1 9000 -q 1 >>/var/log/vaultd.log 2>&1 || sleep 1; done
+     ```
+     started by boot in the background before boot-ok (C3 marker last).
    - `courier` loop: every 10s curls the URL, logs failure `courier: cannot resolve vault.internal`
      or connection errors to `/var/log/courier.log`.
    - Breakage layer: `/etc/hosts` gains `203.0.113.66  vault.internal   # migration 2024?` AND a

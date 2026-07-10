@@ -27,16 +27,24 @@ DESIGN §14 Floor 4 row 4.
      (`su -l root -c …` in check; proxied attempt fails fast: phantom proxy points at 127.0.0.1:1
      connection-refused).
    - `no-phantom-guides` / `No phantom guides your steps` — login-shell env contains NO
-     `http_proxy|https_proxy|HTTP_PROXY|HTTPS_PROXY|all_proxy|ALL_PROXY` (grep -i on `su -l root -c env`).
+     proxy-family variable at all:
+     `http_proxy|https_proxy|all_proxy|no_proxy` in ANY case (grep -iE on `su -l root -c env`) —
+     `no_proxy` included: the poisoned one is itself a fault, and the room's lesson is "no proxy
+     vars at all", stated in the MSG.
    - `courier-cured` / `The courier walks the straight road` — `/usr/local/bin/ask-oracle` wrapper
-     works (it had its OWN hardcoded `export https_proxy=…` line — the third hiding spot).
+     works (it had its OWN hardcoded `export http_proxy=http://127.0.0.1:1` line — the third
+     hiding spot; **lowercase `http_proxy`, matching the wrapper's plain-HTTP curl** — an
+     `https_proxy` poison would be a no-op here, as the review caught).
 2. Dockerfile breakage (three layers of poison, discovered progressively):
    - `/etc/environment`: `http_proxy=http://127.0.0.1:1` + `HTTPS_PROXY=…` (pam_env — affects login shells).
    - `/etc/profile.d/10-corporate-proxy.sh`: exports lowercase+uppercase pairs + bogus `no_proxy=localhost` **missing 127.0.0.1** (subtle: even after other fixes, tools targeting 127.0.0.1 still proxied — teaching no_proxy nuance; note: many tools treat localhost≠127.0.0.1).
-   - `/usr/local/bin/ask-oracle`: wrapper with inline export before its curl call.
-   - `oracled` on 127.0.0.1:7000 answering `ORACLE_OK` (nc/sh loop); boot-ok; sleep infinity.
-3. Fix: cleanse all three sources (delete lines/files) — or set correct `no_proxy` — locks demand
-   *no proxy vars at all* in login env (cleanest lesson) + working wrapper.
+   - `/usr/local/bin/ask-oracle`: wrapper with inline `export http_proxy=http://127.0.0.1:1`
+     before its curl call.
+   - `oracled` on 127.0.0.1:7000 answering `ORACLE_OK` — same reference netcat-openbsd loop as
+     issue 47's `vaultd` (apt adds `netcat-openbsd`); boot (C3): oracled loop, boot-ok, sleep infinity.
+3. Fix: cleanse all three sources (delete lines/files). A "correct no_proxy" is NOT an accepted
+   fix — the locks demand *no proxy vars at all* in login env (cleanest lesson; solution.md's
+   dead-ends section explains why the no_proxy route was rejected).
 4. Hints: 01 curl hangs/refuses — `env | grep -i proxy`; where do these come from? new login shells
    pick them up again. 02 the three classic dens: `/etc/environment`, `/etc/profile.d/*`, and
    inside wrapper scripts themselves — hunt all. 03 near-answer: remove the profile.d file, strip
@@ -48,7 +56,9 @@ DESIGN §14 Floor 4 row 4.
 ## Acceptance Criteria
 
 - [ ] Harness green both arches; pristine: all three locks closed.
-- [ ] Partial cleanses (any 2 of 3 sources) leave ≥1 lock closed with a guiding MSG — matrix table in PR transcript.
+- [ ] Partial-cleanse matrix (scripted, in PR): {env-file only, profile.d only, wrapper only,
+  env+profile.d, env+wrapper, profile.d+wrapper} — each leaves the expected named lock(s) closed
+  (e.g. env+profile.d cleansed → wrapper still poisons `courier-cured`).
 - [ ] Checks use `su -l` (fresh login env), never the exec session env — code-reviewed.
 - [ ] `ValidateDir` clean; image ≤ 150 MB; no flake ×3.
 
@@ -66,4 +76,4 @@ Real proxies, PAC files, apt proxy config (mentioned in solution.md as further d
 
 ## Design References
 
-DESIGN §14 Floor 4; COOKBOOK §4, §6 (login-shell check nuance shared with 31).
+DESIGN §6.1–6.6, §14 Floor 4; COOKBOOK §4, §6 (login-shell check nuance shared with 31).

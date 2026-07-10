@@ -27,16 +27,24 @@ DESIGN §14 Floor 5 row 1; difficulty 4.
    - `phylactery-beats` / `The phylactery accepts connections` — `pg_isready -h 127.0.0.1 -p 5432` (retries ≤ 55s).
    - `app-communes` / `The app user communes with the crypt` —
      `su -s /bin/sh postgres -c ""`-less: run `PGPASSWORD=crypt-pass psql -h 127.0.0.1 -U cryptapp -d cryptdb -tAc 'select 1'` → `1`.
-   - `wards-not-wide-open` / `The wards are not flung wide` — `pg_hba.conf` contains no
-     `trust` rule for `all`/`0.0.0.0/0` (guards against the chmod-777-of-auth fix; grep-based).
+   - `wards-not-wide-open` / `The wards are not flung wide` — NO non-comment `pg_hba.conf` line
+     uses method `trust` AT ALL (parse: strip comments/blank lines, awk last field == `trust` →
+     CLOSED). Any-scope trust is the forbidden shortcut — this also makes the trap transcript
+     consistent (a localhost-only trust line closes the lock, as intended).
 2. Dockerfile + boot:
    - initdb at build (as postgres user); create db `cryptdb`, user `cryptapp` with password
      `crypt-pass`, one table `souls(id int)` with a row (build-time temporary server start — standard pattern).
    - Breakage layer: append `shared_buffers = 128GB` (unstartable on the room's memory) to
      `postgresql.conf`; replace the `host … cryptapp …` hba rule with
      `host cryptdb cryptapp 127.0.0.1/32 reject`.
-   - Boot: respawn-loop `pg_ctl start` as postgres (fails → log breadcrumb at
-     `/var/log/postgresql/startup.log`), boot-ok regardless, sleep infinity.
+   - Debian path/versioning contract (used by boot, checks, solution — the review caught the
+     split-layout trap): `PGVER=$(ls /etc/postgresql | head -1)`,
+     `PGCONF=/etc/postgresql/$PGVER/main/postgresql.conf`, `PGHBA=/etc/postgresql/$PGVER/main/pg_hba.conf`,
+     `PGDATA=/var/lib/postgresql/$PGVER/main`; server control via
+     `su -s /bin/sh postgres -c "pg_ctlcluster $PGVER main start|reload"` (Debian's wrapper knows
+     the config split; plain `pg_ctl -D $PGDATA` misses `/etc` configs).
+   - Boot (C3): respawn loop attempting `pg_ctlcluster … start` every 10s (failures append to
+     `/var/log/postgresql/startup.log` — breadcrumb), C3 boot-ok marker regardless, sleep infinity.
    - Listen on 127.0.0.1 only (default). Password auth = scram (bookworm default).
 3. Fix path: startup log → fix shared_buffers (sane value or remove line) → server starts →
    psql as cryptapp fails with hba error → fix rule to `scram-sha-256` → `pg_ctl reload`.
@@ -44,16 +52,18 @@ DESIGN §14 Floor 5 row 1; difficulty 4.
    (`/var/log/postgresql/…`, or run `pg_ctl start` by hand as postgres) — one config value is
    physically impossible. 02 alive but the app is refused: HBA rules are read top-down —
    find the `reject` line; reload, don't restart. 03 near-answer: sed the two lines +
-   `su -s /bin/sh postgres -c 'pg_ctl reload -D …'`.
+   `su -s /bin/sh postgres -c "pg_ctlcluster $PGVER main reload"`.
 5. `solution.md` (+ Lesson: config-value sanity vs available RAM, hba evaluation order,
-   reload vs restart, why `trust` is the forbidden shortcut). `solution.sh`: both seds
-   (paths per bookworm layout `/etc/postgresql/<ver>/main/…`), start/reload as postgres, psql verify loop.
+   reload vs restart, why `trust` is the forbidden shortcut). `solution.sh` (using the PGVER/
+   PGCONF/PGHBA vars above): `sed -i '/^shared_buffers = 128GB/d' "$PGCONF"`;
+   `sed -i 's#^host cryptdb cryptapp 127.0.0.1/32 reject#host cryptdb cryptapp 127.0.0.1/32 scram-sha-256#' "$PGHBA"`;
+   start via pg_ctlcluster (respawn loop also recovers); psql verify loop ≤ 60s.
 
 ## Acceptance Criteria
 
 - [ ] Harness green on amd64 AND arm64 (postgres apt install works both — evidence).
 - [ ] Pristine: locks 1–2 closed, `wards-not-wide-open` OPEN (reject≠trust) — ADR-006 ≥1-closed satisfied; noted in PR.
-- [ ] `trust`-shortcut route opens lock 2 but closes lock 3 with its MSG — trap transcript.
+- [ ] `trust`-shortcut route (edit the cryptapp line to `trust` + reload) opens lock 2 but closes lock 3 with its MSG — scripted trap transcript.
 - [ ] Image size measured & recorded; ≤ 700 MB uncompressed or escalation filed (KU-5).
 - [ ] Boot (with failing PG) reaches boot-ok < 20s; solution completes < 120s; no flake ×3.
 - [ ] `ValidateDir` clean.

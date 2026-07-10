@@ -166,7 +166,7 @@ printed and the shell re-opens in the same container — state intact.
 | F3 The Flooded Archives | disks, files at scale, logs | 3 | 3 | ≥2 clears on F2 |
 | F4 The Tangled Battlements | in-container networking & web | 4 | 3–4 | ≥2 clears on F3 |
 | F5 The Data Crypts | databases & app data | 4 | 4 | ≥2 clears on F4 |
-| Capstone: The Cascade Throne | multi-fault finale | 1 | 5 | ≥12 total clears |
+| Capstone: The Cascade Throne | multi-fault finale | 1 | 5 | ≥12 **distinct** rooms cleared |
 
 `--free-roam` (config `free_roam: true`) disables gating for practice/classroom use.
 
@@ -237,7 +237,7 @@ Every new dependency beyond this list requires an ADR note (supply-chain posture
 | `debugdungeon map` | Dungeon map: floors, rooms, clears, gating | 3 (static) / 9 (TUI) |
 | `debugdungeon doctor` | Environment diagnosis (Docker, arch, disk, state dir) | 2 |
 | `debugdungeon clean [--all]` | Remove paused run container / all `com.debugdungeon` containers+images | 2 |
-| `debugdungeon version` | Version, commit, Go/API versions | 0 |
+| `debugdungeon version` | Version, commit, Go version, platform (Docker API version is `doctor`'s job) | 0 |
 | `debugdungeon completion <shell>` | cobra-generated completions | 0 |
 | `debugdungeon scenario init <dir>` | Scaffold a new scenario | 7 |
 | `debugdungeon scenario validate <dir>` | Validate spec + static security rules | 7 |
@@ -488,7 +488,8 @@ Locks run sequentially in file order (v1), results collected into
 
 - Terminal states remove the container (`force=true`).
 - `clean`: remove containers labeled `com.debugdungeon.managed=true` not referenced by `run.json`
-  (+ with `--all`: also managed images, and clear `run.json` after confirmation).
+  (+ with `--all`: also managed images, sparing the active run's image). `clean` never touches
+  `run.json` itself — only `give-up`/victory terminate runs.
 - `doctor` warns when managed leftovers or > N GB of managed images exist.
 
 ---
@@ -682,7 +683,7 @@ No file outside the state root and Docker is written.
 | F7 | `run.json` references missing container | reconcile at startup | state → `broken`, same as F5 |
 | F8 | Corrupt state JSON | decode error | quarantine + fresh file + warning (§8.4) |
 | F9 | Two CLIs race on one run | short-scoped flock around each load-mutate-save critical section (`run.lock`); the interactive session does NOT hold the lock while the shell is attached | concurrent mutators serialize; a second mutator blocked > 2s errs: "another debugdungeon command is mid-operation — retry in a moment". Second-terminal `check`/`hint`/`status` remain possible during play (§3.3) |
-| F10 | Disk pressure from images | `doctor` df + image sizes | warn + suggest `clean --all` |
+| F10 | Disk pressure from images | `doctor` reports managed image totals (Docker `DiskUsage` API) | warn + suggest `clean --all` |
 | F11 | Terminal without TTY (`play` in pipe) | `IsTerminal` check | exit 2: `play` requires an interactive terminal; `check` works headless |
 | F12 | Unsupported daemon arch (e.g. Windows containers) | `Info.OSType != "linux"` | exit 3 with explanation |
 
@@ -726,7 +727,7 @@ Common: every scenario teaches a named skill, has 2–4 hints, `solution.md` wit
 
 | ID | Room | Breakage (baked) | Locks (all root-run) |
 |---|---|---|---|
-| `welcome-cell` | tutorial | a `LOCKED` marker file + a note teaching `hint`/`escape`; player deletes marker per instructions | marker absent; note read (file moved) |
+| `welcome-cell` | tutorial | a `LOCKED` marker file + a note teaching `hint`/`escape`; player deletes marker and lights a torch per instructions | `stone-removed` (marker absent); `torch-lit` (player-created file) |
 | `rusty-path` | The Rusty PATH | `/etc/profile` sets PATH missing `/usr/local/bin`; gate binary lives there; decoy broken `open-gate` in `/opt/decoy` earlier in PATH | login-shell PATH contains `/usr/local/bin` before decoy; `/var/dungeon/gate-opened` exists (created by running `open-gate`) |
 | `forbidden-scroll` | permissions | app user `scribe` can't read `/etc/scroll/config.yaml` (root:root 0600) + parent dir 0700; service script fails | `su -s /bin/sh scribe -c 'cat …'` succeeds; scroll service writes heartbeat file |
 | `broken-symlink` | dangling links | `/etc/app/current` symlink → deleted release dir; two versioned dirs exist (one corrupt marker) | symlink resolves to the good release; app script outputs OK |
@@ -737,15 +738,15 @@ Common: every scenario teaches a named skill, has 2–4 hints, `solution.md` wit
 |---|---|---|---|
 | `sleeping-daemon` | crashloop | boot supervisor loops `heartd` which exits on invalid `/etc/heartd.conf` (bad key + wrong pidfile dir) | `heartd` process alive > 10s; heartbeat file fresh |
 | `port-poltergeist` | port conflict | rogue process binds :8080 before the real `wardd`; boot order race scripted | `wardd` listening on 8080; rogue absent |
-| `zombie-horde` | runaway respawner | cron `* * * * *` spawns `zombie.sh` workers that multiply (bounded by pids limit) | zombie process count = 0; cron entry removed/fixed; system load file OK |
-| `cron-curse` | cron env | job needs `APP_ENV` + PATH set inside crontab; silently writes nothing | expected artifact file created within last 2 min (lock waits/retries up to timeout) |
+| `zombie-horde` | runaway respawner | cron `* * * * *` spawns zombie workers that multiply (bounded by pids limit); a similarly-named legit worker must survive | zombie count = 0; cron source removed; legit `grave-worker` still alive |
+| `cron-curse` | cron env | job needs `RITUAL_HOME` env + absolute path, and has an unescaped `%` in its crontab line; silently produces nothing | fresh artifact file exists (retry-checked); crontab line sound (no bare `%`, absolute path) |
 
 ### Floor 3 — The Flooded Archives (★3, Wave 6)
 
 | ID | Room | Breakage | Locks |
 |---|---|---|---|
 | `bloated-vault` | disk full | 64 MB tmpfs at `/var/vault` filled by runaway `debug.log`; app can't write | free space ≥ 20%; app write test passes; log growth stopped (offender loop disabled) |
-| `inode-imp` | inode exhaustion | tmpfs `nr_inodes=4096` exhausted by session-file spam | free inodes ≥ 50%; spammer cron disabled |
+| `inode-imp` | inode exhaustion | tmpfs `nr_inodes=8192` exhausted by session-file spam | free inodes ≥ 50%; session probe works; spammer cron disabled |
 | `log-labyrinth` | needle in logs | service fails at boot with misleading generic error; true cause (bad locale in conf) buried across rotated logs | service healthy; player wrote root-cause filename into `/root/answer` (grader greps expected token) |
 
 ### Floor 4 — The Tangled Battlements (★3–4, Wave 6; all localhost, network:none)
@@ -764,7 +765,7 @@ Common: every scenario teaches a named skill, has 2–4 hints, `solution.md` wit
 | `postgres-lich` | pg won't start | `postgresql.conf` bad param + `pg_hba.conf` rejects app user | pg accepting connections; app user can SELECT over localhost |
 | `redis-wraith` | AOF corruption | truncated appendonly file; redis refuses to start | redis PING ok; sentinel key present (from pre-corruption data); AOF loads clean |
 | `migration-mimic` | half-applied migration | app schema at v3-partial (missing column + stray lock row in migrations table) | migration table consistent; app smoke query works |
-| `secrets-specter` | secret drift | app reads DB password from `/etc/app/secret` but rotated value only in `.env.new`; teaches safe rotation | app connects; old secret file gone; perms 0600 root:app |
+| `secrets-specter` | secret drift | DB password already rotated server-side; app still reads the old value from one of three config sources; teaches hygienic rotation | app connects; old secret purged everywhere; new secret file 0640 root:appgroup and never logged |
 
 ### Capstone (★5, Wave 6)
 
@@ -797,7 +798,7 @@ Common: every scenario teaches a named skill, has 2–4 hints, `solution.md` wit
 
 | # | Unknown | Impact | Plan |
 |---|---|---|---|
-| KU-1 | GH Actions arm64 runner availability/limits for the solvability matrix | CI cost/coverage | verify in issue 02; fallback = amd64-only PR gate + weekly arm64 |
+| KU-1 | GH Actions arm64 runner availability/limits for the solvability matrix | CI cost/coverage | verify in issue 29 (first workflow that needs it); fallback = amd64-only PR gate + weekly arm64 |
 | KU-2 | Podman socket compatibility gaps (exec resize, CopyToContainer) | user support cost | best-effort; doctor detects and warns; test once in Wave 5 |
 | KU-3 | WSL2 UX (PTY + Docker Desktop integration) | Windows reach | manual test during Wave 5; document |
 | KU-4 | `debian:bookworm-slim` digest freshness vs CVE churn | image hygiene | rotation procedure in cookbook; Dependabot doesn't cover digests → quarterly manual chore issue |

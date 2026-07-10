@@ -20,15 +20,21 @@ wrong is a security/consistency defect, so this lands before any store.
 
 ## Detailed Requirements
 
-1. `type Paths struct { StateRoot, ConfigFile, ProgressFile, RunFile, RunLockFile, PacksDir, LogDir, LogFile string }`.
+1. `type Paths struct { StateRoot, ConfigFile, ProgressFile, ProgressLockFile, RunFile, RunLockFile, HistoryFile, PacksDir, LogDir, LogFile string }`
+   (HistoryFile = `history.jsonl`, consumed by issue 62; lock files per issues 20/26).
 2. `ResolvePaths(dataDirFlag string) (Paths, error)` precedence:
    1. `--data-dir` flag value, if non-empty
    2. `DEBUGDUNGEON_HOME` env, if non-empty
    3. Per-OS defaults — exactly DESIGN §8.1:
       - darwin: state root `~/Library/Application Support/debugdungeon`, logs `~/Library/Logs/debugdungeon`, config file inside state root.
       - linux: data `${XDG_DATA_HOME:-~/.local/share}/debugdungeon`, config `${XDG_CONFIG_HOME:-~/.config}/debugdungeon/config.yaml`, logs `${XDG_STATE_HOME:-~/.local/state}/debugdungeon`.
-   When an override (1/2) is used, ALL paths (config, data, logs, packs) nest under it.
-3. `EnsureDirs(p Paths) error`: create missing dirs `0700`; new files created by stores must use `0600` (document; enforced in 20/26).
+   When an override (1/2) is used, ALL paths nest under it with the fixed layout of DESIGN §8.1
+   (`config.yaml`, `progress.json`, `run.json`, `run.lock`, `history.jsonl`, `packs/`, `logs/debug.log`).
+   Override values are passed through `filepath.Abs` + `Clean`; `~` is NOT expanded (shell's job);
+   an existing non-directory at the root is an error before any creation.
+3. `EnsureDirs(p Paths) error`: create (0700) exactly: `StateRoot`, `filepath.Dir(ConfigFile)`,
+   `PacksDir`, `LogDir` — plus needed parents. `ResolvePaths`/`Load` never create anything.
+   New files created by stores must use `0600` (document; enforced in 20/26).
 4. Config file (`config.yaml`), strict decode (unknown fields = error), all fields optional:
    ```yaml
    free_roam: false        # bool, disables floor gating (DESIGN §3.5)
@@ -38,7 +44,11 @@ wrong is a security/consistency defect, so this lands before any store.
    Missing file → zero-value config, not an error. Malformed file → error mentioning the path
    (exit code 1 path; no quarantine for config).
 5. Effective settings precedence (per setting): CLI flag > env (`NO_COLOR`) > config file > default.
-   Expose `type Config struct` + `Load(paths Paths) (Config, error)` + `Effective(flags…)` helper consumed by 04's flag layer.
+   Expose `type Config struct` + `Load(paths Paths) (Config, error)` +
+   `Effective(cfg Config, in Inputs) Settings` where
+   `Inputs{NoColorFlagSet, NoColorFlag bool; NoColorEnvPresent bool; FreeRoamFlagSet, FreeRoamFlag bool}`
+   — explicit "flag was set" booleans (from cobra's `Changed`) so bool precedence is decidable.
+   `Settings{NoColor, FreeRoam, UpdateCheck bool}`. Consumed by 04's flag layer via `cli.Opts`.
 6. All functions must be testable with `t.Setenv` + temp dirs; no global state besides a lazy singleton in `cli` wiring.
 
 ## Acceptance Criteria
@@ -47,6 +57,8 @@ wrong is a security/consistency defect, so this lands before any store.
 - [ ] Dirs created `0700`; test asserts mode bits (skip strict assert on non-POSIX).
 - [ ] Unknown config key yields an error naming the key and the file path.
 - [ ] `free_roam: true` observable via `Config`.
+- [ ] Precedence table tests for no_color: {flag set true, env present, config true/false, nothing} → expected Settings.
+- [ ] Relative `--data-dir` is absolutized; existing file at the root path errors cleanly.
 
 ## Validation
 

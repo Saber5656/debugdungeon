@@ -21,9 +21,12 @@ decided here.
 
 ## Detailed Requirements
 
-1. `type Run struct` — fields exactly per DESIGN §8.3 (schema_version, run_id, scenario_id, source,
-   content_hash, image_ref, container_id, state, started_at, hints_revealed, resets,
-   last_lock_report). `run_id`: `r-` + 6 hex random.
+1. `type Run struct` — JSON tags exactly per DESIGN §8.3:
+   `SchemaVersion int; RunID, ScenarioID, Source, ContentHash, ImageRef, ContainerID, State string;`
+   `StartedAt time.Time` (RFC3339 UTC); `HintsRevealed, Resets int;`
+   `LastLockReport []locks.Report` (issue 19's type — display-safe by construction).
+   State constants: `StateCreating/Running/Checking/Resetting/Broken` strings matching §7.3.
+   `Source`: `bundled` or `pack:<name>` (regex-checked on load). `run_id`: `r-` + 6 hex random.
 2. States & transitions (table-driven; illegal transition = programming error returned as typed err):
    `creating → running`; `running → checking → running|escaped`; `running → resetting → running`;
    `running → given_up`; `running|checking|resetting → broken`; `broken → resetting`;
@@ -33,21 +36,28 @@ decided here.
    transient states → typed `ErrBusy` with the retry message).
 3. Store:
    - `Load(paths) (*Run, error)` — missing file → `(nil, nil)`; corrupt → quarantine to
-     `run.json.corrupt-<unix-ts>`, return `(nil, WarnCorrupt)` sentinel the CLI prints once (§8.4).
+     `run.json.corrupt-<unix-ts>`, return `(nil, WarnCorrupt)` sentinel the CLI prints once;
+     `schema_version` > 1 → typed upgrade error, file untouched (§8.4).
    - `Save(paths, *Run)` — atomic: temp file (0600) in same dir → fsync → rename; dir perms 0700 (05).
    - `Clear(paths)` — remove run.json (idempotent).
+   - Persistence sequencing rule (DESIGN §7.3, consumed by 21/22/24/25): every state transition is
+     SAVED BEFORE the Docker call it announces and the resulting state is saved after — e.g.
+     `creating` saved (container_id empty) → CreateRoom → save container_id → StartRoom → save
+     `running`. Crash between saves is what `Reconcile` repairs.
 4. Advisory lock (F9, short-scoped): `WithLock(paths, func() error) error` — `O_CREATE` `run.lock`
    + `unix.Flock(LOCK_EX)` with a 2s acquire deadline (poll LOCK_NB every 100ms); deadline →
    typed `ErrBusy` ("another debugdungeon command is mid-operation — retry in a moment").
    Held ONLY around load-mutate-save critical sections and engine mutations (evaluate, reset,
    give-up bookkeeping) — NEVER across the interactive shell attach, so second-terminal
    `check`/`hint` work during play (DESIGN §3.3, §11 F9). Read-only `status`/`list` skip it.
-5. `Reconcile(ctx, api, run) (*Run, error)`:
-   - `ContainerInspect(run.ContainerID)`: not found → state `broken`, container_id kept for message.
-   - found & running → unchanged.
-   - found & exited → one `ContainerStart` attempt; success → running; failure → `broken`.
+5. `Reconcile(ctx, api, run) (*Run, error)` (API: `ContainerInspect`, `ContainerStart`; not-found
+   detected via `errdefs.IsNotFound`):
+   - not found (or `ContainerID == ""` from a creating-crash) → state `broken`, id kept for message.
+   - inspect status `running` → unchanged.
+   - status `exited`/`created` → one `ContainerStart` attempt; success → `running`; failure → `broken`.
+   - status `paused`/`restarting`/`removing`/`dead` → `broken` (no rescue attempts).
    - `broken` is recoverable only via reset (24) or give-up (25); message text owned by callers.
-6. `ActiveContainerID` now reads through Load (nil-safe).
+6. `ActiveRunRefs` (16's helper) now reads through Load (nil-safe), same signature.
 7. Elapsed helper: `run.Elapsed(now) time.Duration`.
 
 ## Acceptance Criteria
@@ -61,12 +71,14 @@ decided here.
 
 ## Validation
 
-`go test ./internal/game/...` green (no Docker needed — mocked API); flock behavior additionally
-smoke-tested via two real processes in itest.
+`go test ./internal/game/...` green (no Docker needed — mocked API). Cross-process flock: itest
+file `internal/game/lock_itest_test.go` (tag `itest`) spawning a child `go run`/test-binary helper
+that holds the lock while the parent asserts `ErrBusy` — exact mechanism implementer's choice,
+both real processes required.
 
 ## Dependencies
 
-05, 06, 13.
+05, 06, 13, 16 (helper being replaced), 19 (locks.Report type).
 
 ## Non-goals
 

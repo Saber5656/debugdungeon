@@ -23,19 +23,30 @@ pierces the zero-network posture.
 
 1. Gate chain (ALL must hold, checked in order, short-circuit silent):
    `config.update_check == true` (05; default false) AND env `DEBUGDUNGEON_NO_NETWORK` unset AND
-   invoked command is `version` AND last check ≥ 24h ago (cache file `<state>/update-check.json`:
-   `{last_checked_at, latest_seen}`).
-2. Request: single `GET https://api.github.com/repos/Saber5656/debugdungeon/releases/latest`,
-   timeout 2s, no redirects beyond 3, `User-Agent: debugdungeon/<version>`, NO other headers,
-   no etag persistence beyond the cache file above (keep it dumb). Any failure → silent (debug log only), cache timestamp updated (don't retry-spam).
-3. Compare semver (strip `v`); newer → single stderr line after version output:
-   `update available: v1.3.0 → v1.4.1 (brew upgrade debugdungeon)`. Never colors mandatory, respects no-color.
+   invoked command is `version` AND last check ≥ 24h ago. Cache file
+   `<state>/update-check.json` (0600, atomic temp+rename per C9): `{schema_version:1,
+   last_checked_at: RFC3339, latest_seen: string}`; unreadable/corrupt/newer-schema → treat as
+   "never checked", overwrite on next run (no quarantine — it's a disposable cache). Clock going
+   backwards (last_checked_at in the future) → treat as due.
+2. Request: single `GET https://api.github.com/repos/Saber5656/debugdungeon/releases/latest` via a
+   dedicated `http.Client{Timeout: 2s, CheckRedirect: refuse cross-host + cap 3}` with
+   `Transport{DisableKeepAlives:true, DisableCompression:false}`; only header set is
+   `User-Agent: debugdungeon/<version>` (Go adds Host/Accept-Encoding automatically — "no other
+   headers" means we set none else). Parse only `{tag_name string, prerelease bool}`; ignore
+   entries with `prerelease==true`. Any failure / invalid JSON / non-semver `tag_name` → silent
+   (debug log only), cache timestamp still updated (don't retry-spam).
+3. Compare semver (strip `v`; the running `version.Version` may be `dev`/dirty → never notify in
+   that case). Newer stable → single stderr line after version output:
+   `update available: v1.3.0 → v1.4.1 (brew upgrade debugdungeon)`. Respects no-color.
 4. Hard guarantees (tested):
-   - With default config: zero network calls process-wide for EVERY command (assert via injected
-     RoundTripper that fails the test if used — wire http.Client injection; default client
-     constructed ONLY inside updatecheck behind the gate).
+   - Test seam: `updatecheck.Check(ctx, deps, transport http.RoundTripper)`; production passes the
+     dedicated client's transport, tests pass a fake. There is NO way for user config/env to point
+     the check at a different endpoint (the URL is a compile-time constant) — so a "local httptest
+     override" exists ONLY in tests via the injected transport, never in the shipped binary.
+   - With default config: zero network calls process-wide for EVERY command — assert by walking
+     the cobra command tree in a test with a transport that `t.Fatal`s if invoked.
    - `DEBUGDUNGEON_NO_NETWORK=1` beats config true.
-   - Non-`version` commands never construct the client (arch test: only `version` imports updatecheck… enforced via depguard or a go-list test).
+   - Only `version` wires updatecheck (arch/go-list test: no other cli command file imports it).
 5. Docs: PLAYING.md FAQ entry + config.yaml comment; ADR-007 gets a one-line "implemented by
    issue 66 within the carve-out" annotation (edit allowed).
 6. 35 extension: security suite gains the "default = zero egress" test (the strace audit in 39
@@ -64,4 +75,4 @@ Auto-update, checking on every command, telemetry of ANY kind, canary/notificati
 
 ## Design References
 
-ADR-007 (the carve-out definition); DESIGN §2.3, §10.8; ISSUE_PLAN §7 (v2 boundary).
+ADR-007 (the carve-out definition); DESIGN §2.3, §5.1, §8.1, §8.4, §10.8; ISSUE_PLAN §7 (deferred/boundary).

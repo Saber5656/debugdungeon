@@ -20,10 +20,13 @@ cannot request deviations (schema has no field), and issue 35 regression-tests i
 
 ## Detailed Requirements
 
-1. `BuildRoomConfig(spec *scenario.Spec, runID string, imageRef string) (container.Config, container.HostConfig)`
-   — pure function, no I/O. Values exactly:
-   - Config: `Image=imageRef`, `Labels={managed:"true", scenario:spec.ID, run:runID, version:<cli version>}`
-     (full keys `com.debugdungeon.*`), `Env=["DEBUGDUNGEON=1"]`. Entrypoint/Cmd inherited from image.
+1. `BuildRoomConfig(spec *scenario.Spec, runID, imageRef, cliVersion string) (container.Config, container.HostConfig, warnings []string)`
+   — pure function, no I/O, no logging (clamping reports via the returned `warnings`; callers log).
+   Values exactly:
+   - Config: `Image=imageRef`, `Labels` with full keys `com.debugdungeon.managed="true"`,
+     `com.debugdungeon.scenario=spec.ID`, `com.debugdungeon.run=runID`,
+     `com.debugdungeon.version=cliVersion`; `Env=["DEBUGDUNGEON=1"]`;
+     `StopTimeout: ptr(5)`. Entrypoint/Cmd inherited from image.
    - HostConfig:
      - `NetworkMode: "none"`
      - `CapDrop: ["ALL"]`
@@ -36,13 +39,17 @@ cannot request deviations (schema has no field), and issue 35 regression-tests i
      - `Tmpfs: map[path]"size=<n>m[,nr_inodes=<k>]"` from spec mounts
      - `Init: ptr(true)`, `RestartPolicy: {Name:"no"}`, `ReadonlyRootfs: false`, `AutoRemove: false`
 2. `CreateRoom(ctx, api, spec, runID, imageRef) (containerID string, err error)` →
-   `ContainerCreate` with the pair from (1), name `dd-<spec.ID>-<runID>` (collision → append suffix).
+   `ContainerCreate` with the tuple from (1) (warnings → caller's logger), name
+   `dd-<spec.ID>-<runID>`; on a name-conflict error (`errdefs.IsConflict`) retry with suffixes
+   `-2` … `-5`, then fail with the conflict error.
 3. `StartRoom`, `StopRoom` (timeout 5s), `RemoveRoom(force=true)`, `InspectRoom` (returns running
    state + exit info) — thin wrappers with typed errors.
 4. **Golden test**: marshal the (Config, HostConfig) pair for a maximal fixture spec to JSON and
-   compare to a committed golden file. Any profile change = golden diff = deliberate review. A
-   comment in the golden file references DESIGN §7.4.
-5. Unit test: clamping (spec forged with 9999 MB memory post-validator) logs + clamps to 2048.
+   compare byte-exact to `internal/dockerx/testdata/room_config.golden.json` (pure JSON — no
+   comments; the DESIGN §7.4 cross-reference lives in an adjacent
+   `room_config.golden.README.md`). Any profile change = golden diff = deliberate review.
+5. Unit test: clamping (spec forged with 9999 MB memory post-validator) clamps to 2048 and returns
+   a warning naming field + original value.
 6. itest: create+start `_template` room; `docker inspect` via API and assert live: CapAdd set
    exactly, NetworkMode none, NNP present, PidsLimit, Init, no mounts other than declared tmpfs;
    then stop+remove. (Issue 35 re-runs this as a permanent security gate; here it proves the code.)
@@ -61,7 +68,7 @@ cannot request deviations (schema has no field), and issue 35 regression-tests i
 
 ## Dependencies
 
-13 (07/08 types via module).
+07 (Spec types), 13.
 
 ## Non-goals
 

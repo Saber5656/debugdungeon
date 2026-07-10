@@ -25,7 +25,7 @@ build time.
    - `link-resolves` / `The signpost points somewhere real`
    - `not-corrupt` / `It points to a sound release`
    - `app-ok` / `The gatekeeper app answers`
-2. Dockerfile (breakage layer):
+2. Dockerfile (C3 preamble; single breakage layer; `mkdir -p /etc/app /opt/app/releases/v1.2.3/bin /opt/app/releases/v1.3.0/bin` FIRST):
    - `/opt/app/releases/v1.2.3/bin/run` (sh, 0755): prints `ROOM_OK v1.2.3`.
    - `/opt/app/releases/v1.3.0/bin/run`: prints garbage and exits 1; plus marker file
      `/opt/app/releases/v1.3.0/CORRUPT` (content: `deploy interrupted 03:12`).
@@ -34,10 +34,14 @@ build time.
      failure prints the exec error (symptom trail).
    - Deploy log `/var/log/deploy.log` narrating the interrupted upgrade (breadcrumb).
    - Standard boot script.
-3. Checks:
-   - `link.sh`: `[ -e /etc/app/current ]` (dereferences) else `MSG: /etc/app/current still points into the void (readlink it).`
-   - `corrupt.sh`: `[ ! -e /etc/app/current/CORRUPT ]` else `MSG: That release bears the mark of a broken deploy.`
-   - `app.sh`: `/usr/local/bin/appctl status 2>/dev/null | grep -q '^ROOM_OK'` else `MSG: The gatekeeper app still fails to speak.`
+3. Checks (lock ids `link-resolves`, `not-corrupt`, `app-ok` → files `checks/<id>.sh`):
+   - `link-resolves.sh`: `[ -e /etc/app/current ]` (dereferences) else `MSG: /etc/app/current still points into the void (readlink it).`
+   - `not-corrupt.sh`: **must require a resolved link first** —
+     `[ -e /etc/app/current ] && [ ! -e /etc/app/current/CORRUPT ]` else
+     `MSG: That signpost leads nowhere sound — a resolved, unmarked release is required.`
+     (A dangling link means CLOSED; without the `-e` guard this lock would be OPEN on pristine —
+     the exact bug the review caught.)
+   - `app-ok.sh`: `/usr/local/bin/appctl status 2>/dev/null | grep -q '^ROOM_OK'` else `MSG: The gatekeeper app still fails to speak.`
 4. Hints: 01 `appctl status` fails — what does `/etc/app/current` actually point at (`ls -l`,
    `readlink`)? 02 list `/opt/app/releases` — newest isn't healthiest; check for leftover markers.
    03 `ln -sfn /opt/app/releases/v1.2.3 /etc/app/current`.

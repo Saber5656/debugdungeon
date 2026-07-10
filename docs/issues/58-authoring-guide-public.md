@@ -22,16 +22,21 @@ both start here.
 
 1. Structure:
    1. *Your first room in 20 minutes*: `scenario init` → edit lore/breakage → `validate` → `test` →
-      `play` it locally (`play` on external dirs? NOT supported in v1 — playtesting happens via
-      `scenario test --keep` + manual exec; state this honestly with the exec one-liner).
+      playtest. `play` on external dirs is NOT supported in v1 — playtesting happens via
+      `scenario test --keep` + manual shell (state this honestly, with the exact one-liner:
+      `docker exec -it -u root -w /root <container-id printed by --keep> /bin/bash -l`).
    2. *Anatomy deep-dive*: link-and-summarize COOKBOOK sections (no duplication of normative
       tables — link, don't fork; short summaries only).
    3. *Design a good room*: the craft chapter — one skill per room; symptom → trail → cause
       structure; hint escalation; trap-with-teaching-MSG pattern (examples: 32's 777-trap,
       41's respawn trap); lock MSG voice guide; lore tone (2–4 sentences, playful-grim, no walls of text).
    4. *The two submission paths*: (a) PR into `scenarios/` (bundled; full review + CI gates;
-      checklist); (b) community pack (59–61): pack layout, `pack.yaml`, distribution etiquette,
-      the trust gate users will see (set expectations: your pack is untrusted by default).
+      checklist) — fully documented here; (b) community pack — ships as a STUB in this issue
+      (Wave 7 precedes the pack mechanics): one paragraph setting expectations (packs are
+      untrusted by default; installers see a trust gate covering Dockerfile build execution with
+      network access, the fixed runtime profile, and the raw-PTY residual risk — link DESIGN
+      §10.6/§10.2) + a "details land with pack support" marker. Issue 61's scope includes
+      replacing this stub with the full pack-layout/`pack.yaml`/etiquette section.
    5. *Reference card*: one-page table — commands, budgets, feasible/infeasible classes (from
       COOKBOOK §4/§5), rule-code quick list (SV001–SV025 one-liners).
 2. Every command transcript must be real (copy-pasted from actual runs at writing time).
@@ -39,8 +44,8 @@ both start here.
 
 ## Acceptance Criteria
 
-- [ ] A fresh agent following ONLY AUTHORING.md produces a novel passing room (validate+test green) without reading COOKBOOK — evidence transcript attached.
-- [ ] Zero normative duplication drift: rules appear as links/summaries with pointers, not re-stated tables (spot-check).
+- [ ] A fresh agent following AUTHORING.md **plus its embedded reference card** (the card carries the minimum actionable constraints; deep rationale stays linked in COOKBOOK) produces a novel passing room (validate+test green) — evidence transcript with the exact command sequence (`init` → edits → `validate` → `test` → `--keep` manual exec → cleanup) attached at `docs/research/authoring-freshrun.md` or in the PR.
+- [ ] No normative FORKING: the reference card may restate limits verbatim-with-link; multi-paragraph rule prose is never duplicated (spot-check).
 - [ ] README + CONTRIBUTING link to it; `scenario init` epilogue (56) points at it (already specified there — verify).
 - [ ] Reference card fits one screen (~60 lines).
 
@@ -50,7 +55,7 @@ Fresh-eyes authoring run (as above); markdown link check.
 
 ## Dependencies
 
-12, 56, 57.
+12, 56, 57 (pack section = stub only; 61 completes it — no dependency on Wave 8).
 
 ## Non-goals
 
@@ -58,4 +63,4 @@ Video tutorials, JP translation (v2), gallery/showcase page.
 
 ## Design References
 
-DESIGN §1.3 (P3), §2.2; COOKBOOK (12); ISSUE_PLAN wave 7–8.
+DESIGN §1.3 (P3), §2.2, §5.1, §6.1–6.6, §10.2, §10.6; COOKBOOK (12); ISSUE_PLAN wave 7–8.
