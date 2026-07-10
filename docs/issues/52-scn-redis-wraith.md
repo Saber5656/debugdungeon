@@ -21,13 +21,18 @@ verification after repair. DESIGN §14 Floor 5 row 2; difficulty 4.
 
 1. `scenario.yaml`: id `redis-wraith`, floor 5, difficulty 4, topics `[redis, database, persistence]`,
    time_estimate_min 30. Install `redis-server`, `redis-tools`. Locks:
-   - `wraith-risen` / `The wraith stirs` — `redis-cli -h 127.0.0.1 ping` → `PONG` (retries).
+   - `wraith-risen` / `The wraith stirs` — `redis-cli -h 127.0.0.1 ping` → `PONG` (retries; a
+     living server also proves the AOF now loads clean, since `aof-load-truncated no` means a still-
+     corrupt AOF keeps redis DOWN → this lock CLOSED).
    - `memory-restored` / `The wraith remembers` — `redis-cli get soul:0001` → `intact` (the
      pre-corruption sentinel key survives repair).
    - `keepsake-kept` / `Persistence still guards the memory` — FILE-based (works while redis is
-     down — the review caught that `redis-cli config get` can't run against a dead server):
-     `/etc/redis/redis.conf` non-comment lines contain `appendonly yes` and no `appendonly no`.
-     Pristine (config untouched) → OPEN, per the ADR-006 note below. Timeout 10.
+     down — `redis-cli config get` can't run against a dead server): `/etc/redis/redis.conf`
+     non-comment lines contain `appendonly yes` AND `aof-load-truncated no` AND no `appendonly no`
+     AND no `aof-load-truncated yes`. This closes the DESIGN §14 "AOF loads clean" intent AND the
+     re-review's escape (flipping `aof-load-truncated yes` would let redis silently skip the
+     corrupt tail — forbidden here; the player must actually repair the AOF, not disable the
+     safety). Pristine (config untouched: `yes`/`no`) → OPEN. Timeout 10.
 2. Dockerfile + boot (C3 preamble; apt: `redis-server`, `redis-tools`):
    - Config `/etc/redis/redis.conf` (exact keys): `appendonly yes`, `dir /var/lib/redis`,
      `appenddirname "appendonlydir"`, `bind 127.0.0.1`, `daemonize no`,

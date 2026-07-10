@@ -29,6 +29,11 @@ where run → progress handoff happens (§9.4–9.5).
    - Under a second SHORT section: save `last_lock_report`; not-all-open → back to `running`;
      all-open → leave state `checking` for `Victory` (same command invocation) to consume.
    - Returns reports + allOpen.
+   - **Crash-during-RunAll recovery:** if the CLI dies while state is `checking`, the run is NOT
+     wedged — the next command's `Reconcile` (20's crash-recovery rule) maps a `checking` run whose
+     container is still `running` back to `running`. So a stuck `checking` state cannot outlive one
+     command; no extra lease/deadline needed. (This is why `checking` is a transient state, never
+     durable — DESIGN §7.3.)
 2. `Victory(ctx, deps, run, reports) (Cleared, error)`:
    - Compute elapsed (20 helper), gather hints_revealed/resets.
    - `progress.ApplyClear` (26) → `ClearResult{FirstClear, BestUpdated, PrevStatus}`.

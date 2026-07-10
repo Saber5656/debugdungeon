@@ -39,9 +39,11 @@ for open file handles. DESIGN §14 Floor 3 row 1. First scenario exercising spec
      guarantees the archivist probe fails on pristine); start `archivist` loop
      (`/usr/local/bin/archivist`: every 5s writes a small record then touches
      `/var/vault/records/.last-ok`; ENOSPC failures logged to `/var/log/archivist.log`); start
-     `chatterbox` loop (`/usr/local/bin/chatterbox`: while `/etc/chatterbox.enabled` exists,
-     append noise-chunks to debug.log, tolerating ENOSPC with `|| true` + 2s sleep — alive but
-     naturally blocked); C3 boot-ok marker; `exec sleep infinity`. Boot completes < 25s.
+     `chatterbox` loop (`/usr/local/bin/chatterbox`: runs FOREVER until killed — the flag controls
+     WRITES, not process lifetime, so `chatterbox-silenced`'s process-absence clause is stable, not
+     the ~2s race the re-review caught:
+     `while true; do [ -e /etc/chatterbox.enabled ] && { append_noise || true; }; sleep 2; done`);
+     C3 boot-ok marker; `exec sleep infinity`. Boot completes < 25s.
 3. Check MSGs: `df` pointer / `The archivist still cannot file records.` /
    `Something still babbles into the vault — find the chatterbox and its enabling charm.`
 4. Hints: 01 `df -h` → who's full? `du -a /var/vault | sort -n | tail`. 02 the log is huge —
@@ -55,7 +57,7 @@ for open file handles. DESIGN §14 Floor 3 row 1. First scenario exercising spec
 ## Acceptance Criteria
 
 - [ ] Harness green both arches; pristine: all three locks closed (ENOSPC seed proven by the probe write failing); boot completes < 25s.
-- [ ] Truncate-only route (flag/process untouched) leaves `chatterbox-silenced` closed; flag-removed-but-process-alive also closed — trap matrix verified.
+- [ ] `chatterbox-silenced` requires BOTH flag absent AND process killed: truncate-only → closed; flag-removed-but-process-alive → closed (process never self-exits — asserted by leaving it running 10s after flag removal); only kill+flag-remove → open. Trap matrix verified.
 - [ ] Host safety: writes confined to the tmpfs (inspect: no disk growth in container layer beyond noise) — reviewer checkbox.
 - [ ] `ValidateDir` clean (tmpfs schema path); image ≤ 150 MB; no flake ×3.
 

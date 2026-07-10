@@ -35,8 +35,11 @@ DESIGN §14 Floor 5 row 1; difficulty 4.
    - initdb at build (as postgres user); create db `cryptdb`, user `cryptapp` with password
      `crypt-pass`, one table `souls(id int)` with a row (build-time temporary server start — standard pattern).
    - Breakage layer: append `shared_buffers = 128GB` (unstartable on the room's memory) to
-     `postgresql.conf`; replace the `host … cryptapp …` hba rule with
-     `host cryptdb cryptapp 127.0.0.1/32 reject`.
+     `postgresql.conf`; and for HBA, **first comment out Debian's default broad localhost `host
+     all all 127.0.0.1/32 …` line** (so it can't match before ours — the re-review caught that a
+     broad default would let the app in after only the shared_buffers fix), then add
+     `host cryptdb cryptapp 127.0.0.1/32 reject` as the effective localhost rule for cryptapp.
+     The intended fix flips that one line to `scram-sha-256`; no broader rule shadows it.
    - Debian path/versioning contract (used by boot, checks, solution — the review caught the
      split-layout trap): `PGVER=$(ls /etc/postgresql | head -1)`,
      `PGCONF=/etc/postgresql/$PGVER/main/postgresql.conf`, `PGHBA=/etc/postgresql/$PGVER/main/pg_hba.conf`,
@@ -62,7 +65,7 @@ DESIGN §14 Floor 5 row 1; difficulty 4.
 ## Acceptance Criteria
 
 - [ ] Harness green on amd64 AND arm64 (postgres apt install works both — evidence).
-- [ ] Pristine: locks 1–2 closed, `wards-not-wide-open` OPEN (reject≠trust) — ADR-006 ≥1-closed satisfied; noted in PR.
+- [ ] Pristine: locks 1–2 closed (verify lock 2 is closed because the reject line is EFFECTIVE — no broader default localhost rule precedes it; scripted proof: after only fixing shared_buffers, `psql` as cryptapp still fails), `wards-not-wide-open` OPEN — ADR-006 ≥1-closed satisfied; noted in PR.
 - [ ] `trust`-shortcut route (edit the cryptapp line to `trust` + reload) opens lock 2 but closes lock 3 with its MSG — scripted trap transcript.
 - [ ] Image size measured & recorded; ≤ 700 MB uncompressed or escalation filed (KU-5).
 - [ ] Boot (with failing PG) reaches boot-ok < 20s; solution completes < 120s; no flake ×3.

@@ -46,15 +46,20 @@ production engine pieces (14, 15, 19) — no parallel implementation.
 3. `scenarios_solvability_test.go`: iterates `Registry.All()` (bundled), subtests per scenario,
    honoring `-run` filtering; env `DD_SCENARIO_FILTER` (comma ids) for CI path-filtering.
 4. **Service-pattern feasibility fixtures (KU-11 gate)**: under `internal/harness/testdata/feasibility/`,
-   five minimal scenario dirs, each shaped identically: floor 1, ★1, ONE probe lock + a trivial
-   marker breakage (boot writes `/var/dungeon/SEAL`; `solution.sh` = `rm -f /var/dungeon/SEAL` —
-   satisfies the ≥1-closed gate without touching the service), so the probe lock passing on
-   pristine state IS the feasibility proof:
-   - `feas-su`: probe `su -l root -c true` exits 0.
-   - `feas-cron`: boot starts `cron`; probe waits ≤ 55s (timeout 60) for a `* * * * *` job's artifact.
-   - `feas-nginx`: apt nginx; boot starts it; probe curls 200 on 127.0.0.1:80.
-   - `feas-postgres`: apt postgresql; initdb'd at build; probe `pg_isready` + trivial SELECT.
-   - `feas-redis`: apt redis-server; probe `redis-cli ping` → PONG.
+   five minimal scenario dirs, each shaped identically with TWO locks (so the harness's
+   ≥1-CLOSED-on-pristine gate is satisfied — the re-review caught that a single always-open probe
+   lock fails `already-open`):
+   - `service-up` — the pattern's probe (below), OPEN on pristine AND after solution.
+   - `seal-broken` — boot writes `/var/dungeon/SEAL`; check `[ ! -e /var/dungeon/SEAL ]` → CLOSED
+     on pristine, OPEN after `solution.sh` (`rm -f /var/dungeon/SEAL`). This is the required
+     initial-breakage; the service is never touched by the solution.
+   The per-pattern `service-up` probe:
+   - `feas-su`: `service-up` = `su -l root -c true` exits 0.
+   - `feas-cron`: boot starts `cron`; `service-up` waits ≤ 55s (timeout 60) for a `* * * * *` job's artifact.
+   - `feas-nginx`: apt nginx; boot starts it; `service-up` curls 200 on 127.0.0.1:80.
+   - `feas-postgres`: apt postgresql; initdb'd at build; `service-up` = `pg_isready` + trivial SELECT.
+   - `feas-redis`: apt redis-server; `service-up` = `redis-cli ping` → PONG.
+   (Each also ships the `seal-broken` lock above — two locks total per fixture.)
    Run through TestScenario in the itest suite BEFORE Wave 6 content is authored; a failing
    fixture blocks Wave 6 and triggers a design escalation (do NOT weaken the profile unilaterally —
    DESIGN §10.3).

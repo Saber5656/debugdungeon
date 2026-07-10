@@ -16,7 +16,7 @@ decided here.
 ## Scope
 
 - `internal/game/run.go`, `internal/game/store.go`, `internal/game/reconcile.go` + tests
-- Replaces the internals of `game.ActiveContainerID` (introduced in 16) with the real store, same signature
+- Replaces the internals of `game.ActiveRunRefs` (introduced in 16) with the real store, keeping its `(containerID, imageRef string, ok bool)` signature
 - Not: any CLI command wiring (21–25), progress (26)
 
 ## Detailed Requirements
@@ -51,11 +51,15 @@ decided here.
    give-up bookkeeping) — NEVER across the interactive shell attach, so second-terminal
    `check`/`hint` work during play (DESIGN §3.3, §11 F9). Read-only `status`/`list` skip it.
 5. `Reconcile(ctx, api, run) (*Run, error)` (API: `ContainerInspect`, `ContainerStart`; not-found
-   detected via `errdefs.IsNotFound`):
-   - not found (or `ContainerID == ""` from a creating-crash) → state `broken`, id kept for message.
-   - inspect status `running` → unchanged.
+   detected via `errdefs.IsNotFound`). Reconcile keys off the CONTAINER status, then normalizes the
+   run state — a run persisted in a transient state (`creating`/`checking`/`resetting`) is NEVER
+   left transient (crash-recovery rule, DESIGN §7.3):
+   - not found (or `ContainerID == ""` from a creating-crash) → `broken`, id kept for message.
+   - container status `running` → run state `running` (recovers a crash-saved `checking`/
+     `resetting`/`creating` whose container is actually up — the fix the re-review caught).
    - status `exited`/`created` → one `ContainerStart` attempt; success → `running`; failure → `broken`.
    - status `paused`/`restarting`/`removing`/`dead` → `broken` (no rescue attempts).
+   - a run already `running` with a `running` container → unchanged.
    - `broken` is recoverable only via reset (24) or give-up (25); message text owned by callers.
 6. `ActiveRunRefs` (16's helper) now reads through Load (nil-safe), same signature.
 7. Elapsed helper: `run.Elapsed(now) time.Duration`.
@@ -66,7 +70,7 @@ decided here.
 - [ ] Corrupt-file test: garbage bytes → quarantined file exists, Load returns nil + warning sentinel.
 - [ ] Atomicity: crash-simulation test (write temp, no rename) leaves previous run.json intact.
 - [ ] flock tests: WithLock serializes two goroutines (new fds); a holder past 2s makes the second caller ErrBusy; lock is NOT held during a simulated long session (concurrent WithLock succeeds while "session" runs).
-- [ ] Reconcile paths (missing/running/exited-restartable/exited-dead) covered with mocked API.
+- [ ] Reconcile paths covered with mocked API, INCLUDING every transient state (`creating`/`checking`/`resetting`) + `running` container → recovered to `running` (the crash-recovery rule); missing/exited-restartable/exited-dead/paused → per table.
 - [ ] File modes: run.json 0600.
 
 ## Validation

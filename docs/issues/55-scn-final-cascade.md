@@ -22,7 +22,9 @@ DESIGN §14 capstone; unlocks at ≥12 total clears (§3.5).
 
 1. `scenario.yaml`: id `final-cascade`, floor 6, difficulty 5, topics `[triage, disk, services, permissions]`,
    time_estimate_min 60; `mounts.tmpfs: [{path: /var/spool/throne, size_mb: 48}]`. Locks:
-   - `waters-receded` / `The flood has receded` — tmpfs usage ≤ 70% AND flooder disabled.
+   - `waters-receded` / `The flood has receded` — tmpfs usage ≤ 70% AND flooder disabled
+     (`/etc/chronicler.enabled` absent AND no `chronicler` process running — same both-conditions
+     rule as issue 44, so it can't be satisfied transiently).
    - `herald-stands` / `The herald stands again` — heraldd running >10s, no stale pidfile conflict.
    - `throne-answers` / `The throne answers petitions` — end-to-end probe using the exact
      petition contract below: submit via `throne-petition "audit probe"`, then retry ≤ 45s
@@ -38,8 +40,10 @@ DESIGN §14 capstone; unlocks at ≥12 total clears (§3.5).
 3. Cascade construction (Dockerfile + boot; boot owns ALL tmpfs content — 44's pattern; each fault
    gated behind the previous):
    - **Fault A (flood)**: boot seeds `/var/spool/throne/debug.log` to ENOSPC (44's dd pattern);
-     `chronicler` loop (`/usr/local/bin/chronicler`) keeps appending while flag
-     `/etc/chronicler.enabled` exists (ENOSPC-tolerant, like 44).
+     `chronicler` loop (`/usr/local/bin/chronicler`) runs FOREVER until killed — the flag controls
+     WRITES only, not process lifetime (44's corrected pattern:
+     `while true; do [ -e /etc/chronicler.enabled ] && { append || true; }; sleep 2; done`), so
+     `waters-receded`'s process clause is stable.
    - **Fault B (pidfile)**: `heraldd` startup guard — if `/run/herald.pid` exists → log
      `heraldd: refusing to start: pidfile /run/herald.pid exists (stale?)` and exit 1; ALSO
      requires ≥ 20% free space on the spool (`df -P` check) → logs

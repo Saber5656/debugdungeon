@@ -423,7 +423,11 @@ stays `running` with no attached session. Command eligibility by state:
 | `give-up` | ✔ | ✔ | busy error |
 
 Transitions are persisted before/after each Docker call so a crashed CLI can recover
-(`play` reconciles `run.json` against actual Docker state at startup; issue 20).
+(`play`/`check`/etc. reconcile `run.json` against actual Docker state at startup; issue 20).
+**Crash recovery rule:** a run persisted in any *transient* state (`creating`, `checking`,
+`resetting`) whose container is actually `running` is recovered to `running` on the next command —
+transient states are never durable, so a CLI crash mid-check/mid-reset can never wedge a run as
+permanently busy. If the container is gone or not running, the run becomes `broken`.
 
 ### 7.4 Container creation parameters (fixed, not scenario-overridable)
 

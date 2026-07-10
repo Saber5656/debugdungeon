@@ -56,10 +56,13 @@ validation here are security-critical; the consent UX layers on in 61.
       pack's Dockerfiles to run at first play in the Docker build environment, which has network
       access (DESIGN §10.6) → `Install pack '<name>'? Type the pack name to confirm:`
       (typed-name confirm; non-TTY → require `--yes-i-trust-this-pack`).
-   5. Move into `<state>/packs/<name>/` (atomic: temp → rename within same volume).
-   6. Write `packs/<name>/.provenance.json`:
+   5. Write `.provenance.json` INTO the staged copy and fsync it BEFORE the final move (re-review
+      catch: writing it after the rename risks an installed pack with no provenance/accepted_at):
       `{schema_version:1, name, version, source: {kind:"path"|"tarball", ref:<abs path>, sha256:<tarball hash|null>}, installed_at, cli_version, accepted_at: null}`
-      (accepted_at consumed by 61's first-play gate).
+      (accepted_at consumed by 61's first-play gate). If provenance write/fsync fails → abort and
+      clean the staging dir before touching any existing pack.
+   6. Move staged pack into `<state>/packs/<name>/` (atomic rename within the same volume; for
+      `--force` replacement use the trash-swap sequence in step 3).
 7. Registry integration: `AddPackDir` per pack at startup (10); load failure of an installed pack
    → warn + skip, recording the reason for 60's `pack list` to display (the `pack list` COMMAND
    itself is issue 60's scope — this issue only ensures the skip-with-reason data exists).
