@@ -26,7 +26,8 @@ record, and rendered sanitized.
      markdown-lite: `**bold**` and backtick spans styled via ui when color on; plain otherwise.
 2. Re-reveal behavior: `hint` never re-prints earlier hints; `debugdungeon hint --all` prints all
    *already revealed* hints (no state change) — for players returning after a pause.
-3. `hint` command: no active run → exit 5; acquires run lock; renders
+3. `hint` command: no active run → exit 5; wraps the reveal-increment save in `WithLock` (20,
+   short section — works from a second terminal during play); renders
    `Hint 2/3:` header + body indented two spaces.
 4. In-session path (21) calls the same function; output written above the re-entered shell.
 5. Exhausted rendering: `No more hints. The dungeon expects you to prevail — or type giveup.`
@@ -45,7 +46,7 @@ flow in PR.
 
 ## Dependencies
 
-10, 20.
+10, 11, 20.
 
 ## Non-goals
 

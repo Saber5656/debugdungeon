@@ -88,7 +88,7 @@ Broad range, explicitly both ends (owner decision, 2026-07-10):
 | Anti-cheat | Local single-player; players can inspect images — reading checks is a legitimate "hint" |
 | i18n of game content | English content v1; Japanese README translation optional non-blocking |
 | systemd inside scenarios | Heavy/fragile in containers; cookbook mandates boot-script pattern (§7.4) |
-| Telemetry / analytics / auto-update | Zero network calls from the CLI itself (ADR-007); opt-in update *check* is a Wave 9 item, off by default |
+| Telemetry / analytics / auto-update | No **implicit** network I/O from the CLI (ADR-007); the only network operations are user-initiated (§10.8); opt-in update *check* is a Wave 9 item, off by default |
 
 ---
 
@@ -306,7 +306,7 @@ Strict decoding: unknown fields are a **validation error** (prevents silent capa
 | `time_estimate_min` | int | ✔ | 5–120 |
 | `lore` | string | ✔ | ≤ 1500 chars; rendered sanitized (§10.5) |
 | `entry.user` | string |  | default `root`; must exist in image |
-| `entry.shell` | string |  | default `/bin/bash`; absolute path |
+| `entry.shell` | string |  | default `/bin/bash`; **in schema v1 the only allowed value is `/bin/bash`** (helpers rely on bash login semantics; field exists for future widening) |
 | `entry.workdir` | string |  | default `/root`; absolute path |
 | `build.context` | string |  | default `./image`; must resolve inside scenario dir, no symlink escape |
 | `locks[]` | list | ✔ | 1–8 items |
@@ -320,7 +320,7 @@ Strict decoding: unknown fields are a **validation error** (prevents silent capa
 | `resources.memory_mb` | int |  | default 512, max 2048 |
 | `resources.cpus` | float |  | default 1.0, max 2.0 |
 | `resources.pids` | int |  | default 256, max 1024 |
-| `mounts.tmpfs[]` | list |  | ≤2 items `{path: /abs, size_mb: ≤256, nr_inodes: optional}`; total ≤ 512 MB |
+| `mounts.tmpfs[]` | list |  | ≤2 items `{path: /abs, size_mb: ≤256, nr_inodes: optional}`; total ≤ 512 MB; paths distinct and non-nested (neither may be a prefix of the other), never `/` or under `/dungeon` |
 | `network` | enum |  | v1: only `none` (default). Other values reserved, validation error |
 
 Normative validation rules (structural + semantic + security) are itemized in issue 08;
@@ -362,6 +362,8 @@ symptom recap, root cause, fix commands, and "lesson learned" section.
   supervisors), then `exec sleep infinity`. No systemd. Docker `Init: true` (tini) reaps zombies.
 - Breakage is baked at build time (layers may show the recipe — acceptable; the cookbook
   recommends consolidating breakage into one layer to reduce casual spoilers).
+  **Exception:** anything under a spec `mounts.tmpfs` path must be created by `/dungeon-boot.sh`
+  at runtime — a tmpfs mounted at container create shadows whatever the image baked at that path.
 - Uncompressed image size budget: ≤ 500 MB (floor 5 exceptions up to 700 MB, justified).
 - Must not contain: hints, solution files, lock scripts, or the string content of future hints.
 - Every scenario must be solvable under the **fixed security profile** (§10.3): no capability
@@ -400,13 +402,25 @@ ensureImage(scenario):
 States (engine-internal, stored in `run.json`):
 
 ```
-(none) → creating → running ↔ (paused: shell detached, container still up)
+(none) → creating → running
               running → checking → running        (locks failed)
-              running → escaped   (terminal)      → container removed
+              running → checking → escaped (terminal) → container removed
               running → given_up  (terminal)      → container removed
-              running → resetting → running       (new container, same run)
-              any     → broken    (container died / daemon lost) → play offers reset
+              running ↔ resetting                 (new container, same run)
+              broken  → resetting → running
+              running|checking|resetting → broken (container died / daemon lost)
 ```
+
+"Paused" is presentation language, not a persisted state: when the shell detaches, the run simply
+stays `running` with no attached session. Command eligibility by state:
+
+| Command | running | broken | checking/resetting (transient) |
+|---|---|---|---|
+| `play` (resume) | ✔ attach | ✔ offers reset | retry after transient |
+| `check` | ✔ | ✖ (reset first) | busy error |
+| `hint` | ✔ | ✔ | busy error |
+| `reset` | ✔ | ✔ | busy error |
+| `give-up` | ✔ | ✔ | busy error |
 
 Transitions are persisted before/after each Docker call so a crashed CLI can recover
 (`play` reconciles `run.json` against actual Docker state at startup; issue 20).
@@ -424,14 +438,15 @@ Transitions are persisted before/after each Docker call so a crashed CLI can rec
 | `HostConfig.Privileged` | `false` (never) |
 | `HostConfig.Memory` / `NanoCPUs` / `PidsLimit` | from spec, clamped to §6.2 maxima |
 | `HostConfig.Init` | `true` (tini zombie reaping) |
-| `HostConfig.Binds` / `Mounts` | **no host mounts ever**; only spec tmpfs mounts (§6.2) |
+| `HostConfig.Binds` / `Mounts` | **no host mounts ever**; only spec tmpfs mounts (§6.2) via `HostConfig.Tmpfs: map[path]"size=<n>m[,nr_inodes=<k>]"` (default tmpfs mode/ownership; scenarios chown/chmod in boot script if needed) |
 | `HostConfig.ReadonlyRootfs` | `false` (players must edit the system) |
 | `HostConfig.RestartPolicy` | `no` |
 | `StopTimeout` | 5s |
 
 ### 7.5 Interactive session and sentinel exit codes (ADR-003)
 
-- Session = `docker exec` with TTY: `Cmd = [entry.shell, "-l"]`, `User = entry.user`,
+- Session = `docker exec` with TTY: `Cmd = ["/bin/bash", "-l"]` (entry.shell is bash-only in
+  schema v1, §6.2), `User = entry.user`,
   `WorkingDir = entry.workdir`, `Env` includes `HISTFILE=<home>/.dungeon_history`,
   `DEBUGDUNGEON=1`, `TERM` passthrough.
 - Host puts local stdin into raw mode (`x/term`), streams to the exec attach, handles
@@ -459,11 +474,15 @@ Scenarios that sabotage PATH remain playable: the banner always names the absolu
 
 ### 7.7 Lock execution
 
-For each lock, host runs a non-TTY exec: `Cmd = ["/bin/sh","-s"]`, `User = "root"`,
-`AttachStdin`, writes the script bytes, closes stdin, reads multiplexed stdout/stderr
-(≤ 4 KiB kept), waits with a `timeout_sec` context; on timeout the exec process is killed via
-a best-effort `kill` exec and reported CLOSED. Locks run sequentially in file order (v1),
-results collected into `LockReport{id, name, open, msg, durationMs}`.
+For each lock, host runs a non-TTY exec: `Cmd = ["timeout", "<timeout_sec>", "/bin/sh", "-s"]`
+(coreutils `timeout` runs **inside** the container and reliably kills the script's process group —
+the Docker API cannot kill an exec), `User = "root"`, `AttachStdin`, writes the script bytes,
+closes stdin, reads multiplexed stdout/stderr (≤ 4 KiB kept). Host waits with a
+`timeout_sec + 2s` backstop context; if even the backstop trips (in-container `timeout` gone or
+wedged), report CLOSED with a timeout message, log a stray-process warning, and rely on
+`reset`/teardown for cleanup. Cookbook forbids scenarios removing coreutils (`timeout` included).
+Locks run sequentially in file order (v1), results collected into
+`LockReport{id, name, open, msg, durationMs}`.
 
 ### 7.8 Cleanup & GC
 
@@ -487,8 +506,10 @@ results collected into `LockReport{id, name, open, msg, durationMs}`.
 | Installed packs | `<state root>/packs/<pack-name>/` | `<data>/packs/<pack-name>/` |
 | Debug logs | `~/Library/Logs/debugdungeon/debug.log` | `${XDG_STATE_HOME:-~/.local/state}/debugdungeon/debug.log` |
 
-`DEBUGDUNGEON_HOME` overrides the state root (config, data, logs all under it) — used by tests
-and E2E. Directories 0700, files 0600. Log rotation: truncate at 5 MB keeping one `.old`.
+`DEBUGDUNGEON_HOME` (or `--data-dir`) overrides everything: the per-OS table above is replaced by
+a single root with the fixed layout `config.yaml`, `progress.json`, `run.json`, `run.lock`,
+`history.jsonl`, `packs/`, `logs/debug.log` — used by tests and E2E. Directories 0700, files 0600.
+Log rotation: truncate at 5 MB keeping one `.old`.
 
 ### 8.2 `progress.json` (schema_version 1)
 
@@ -572,7 +593,7 @@ daemon, integrity of released binaries, the player's trust in installed content.
 | # | Boundary | Rule |
 |---|---|---|
 | TB1 | CLI ↔ Docker daemon | Daemon is trusted infra. CLI must function without root when the user's daemon setup allows it; never instruct `sudo` silently |
-| TB2 | Host ↔ scenario container | Container is a sandbox with the fixed profile (§7.4). Nothing from inside executes on the host. The only signals crossing inward→outward are exec exit codes and captured byte streams (always treated as untrusted data) |
+| TB2 | Host ↔ scenario container | Container is a sandbox with the fixed profile (§7.4). Nothing from inside executes on the host. The only signals crossing inward→outward are exec exit codes and captured byte streams (always treated as untrusted data). **Residual risk:** during the interactive raw-PTY session, container programs write directly to the player's terminal unsanitized (that is the product); hostile content could emit terminal control sequences there. Accepted for bundled (reviewed) content; for community packs this risk is named in the trust gate (§10.6) |
 | TB3 | Engine ↔ scenario content | All scenario-sourced strings are untrusted input: strict schema, size caps, sanitization before terminal output |
 | TB4 | Bundled vs community content | Bundled = reviewed in-repo (trusted at build). Community packs = untrusted until user consents through the trust gate (§10.6) |
 | TB5 | Release pipeline ↔ users | Reproducible-ish builds, checksums, provenance (§10.7) |
@@ -615,6 +636,11 @@ design (the player asked for a real TTY into the sandbox) — documented residua
 - Install requires explicit source; nothing auto-fetches.
 - On install: full validation (as bundled) + a **capability disclosure**: image base, tmpfs sizes,
   resource asks, per-file listing summary; user must type the pack name to confirm.
+- **Consent covers build execution.** Building a pack scenario runs its Dockerfile in the Docker
+  daemon's build environment, which (unlike the runtime profile) has network access for base-image
+  pulls and package installs. The disclosure states this in plain words, and the raw-PTY residual
+  risk (TB2). **Ordering guarantee:** no `docker build` of pack content ever happens before BOTH
+  install consent and the pack's first-play acceptance are recorded.
 - Provenance recorded (`source`, commit hash for git, sha256 for tarballs) in
   `packs/<name>/.provenance.json`; `list` shows origin; first `play` of any pack scenario
   re-shows a one-line origin warning.
@@ -630,9 +656,16 @@ design (the player asked for a real TTY into the sandbox) — documented residua
 
 ### 10.8 Privacy
 
-Zero network calls from the CLI itself (ADR-007). Docker daemon pulls base images during builds —
-documented. No file outside the state root and Docker is written. Wave 9 update check is opt-in,
-off by default, GET-only, no identifiers beyond User-Agent version string.
+**No implicit network I/O** from the CLI (ADR-007). Every network operation in the system is
+user-initiated and enumerable:
+
+1. Docker daemon pulls pinned base images during `docker build` (triggered by `play`/`scenario test`).
+2. `pack install <git-url>` runs the system `git` at the user's explicit command (Wave 8).
+3. The opt-in update check (Wave 9): off by default, config-gated, GET-only, ≤1/24h, no
+   identifiers beyond the User-Agent version string.
+
+Nothing else touches the network — no telemetry, no crash upload, no implicit update checks.
+No file outside the state root and Docker is written.
 
 ---
 
@@ -648,7 +681,7 @@ off by default, GET-only, no identifiers beyond User-Agent version string.
 | F6 | Lock script timeout | exec wait > timeout | lock CLOSED with "timed out after Ns" |
 | F7 | `run.json` references missing container | reconcile at startup | state → `broken`, same as F5 |
 | F8 | Corrupt state JSON | decode error | quarantine + fresh file + warning (§8.4) |
-| F9 | Two CLIs race on one run | flock on `run.json` (advisory lock) | second process errs: "another debugdungeon session is active" |
+| F9 | Two CLIs race on one run | short-scoped flock around each load-mutate-save critical section (`run.lock`); the interactive session does NOT hold the lock while the shell is attached | concurrent mutators serialize; a second mutator blocked > 2s errs: "another debugdungeon command is mid-operation — retry in a moment". Second-terminal `check`/`hint`/`status` remain possible during play (§3.3) |
 | F10 | Disk pressure from images | `doctor` df + image sizes | warn + suggest `clean --all` |
 | F11 | Terminal without TTY (`play` in pipe) | `IsTerminal` check | exit 2: `play` requires an interactive terminal; `check` works headless |
 | F12 | Unsupported daemon arch (e.g. Windows containers) | `Info.OSType != "linux"` | exit 3 with explanation |
@@ -772,6 +805,7 @@ Common: every scenario teaches a named skill, has 2–4 hints, `solution.md` wit
 | KU-6 | cosign signing UX for casual users | release trust | v1 ships checksums + GitHub attestation; cosign revisit v2 |
 | KU-7 | Exit-code collision: player program legitimately exits 42 | spurious lock run | acceptable (lock run is harmless); documented easter egg |
 | KU-8 | Homebrew tap name/formula availability | distribution | verify at issue 36 |
+| KU-11 | Service patterns (su login, cron, nginx, postgres, redis) unproven under the fixed profile before content fan-out | Floor 2–5 feasibility | issue 29 ships feasibility probe fixtures per pattern, run in the harness suite before Wave 6 starts |
 
 ---
 

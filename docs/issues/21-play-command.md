@@ -25,8 +25,10 @@ experience. All game-loop UX text is born here.
 3. Active-run rules (§3.3): same id → resume (Reconcile; broken → offer reset guidance, exit 1);
    different id → exit 1 with message; `--force` → abandon current (stop+remove container,
    Clear run; progress untouched, NO solution reveal) after y/N confirm, then proceed.
-4. Fresh start sequence (each step logged; failure unwinds: remove container if created):
-   `Acquire lock (20)` → `EnsureImage` (14; while building show spinner line
+4. Fresh start sequence (each step logged; failure unwinds: remove container if created; state
+   mutations wrapped in short `WithLock` sections (20) — the lock is NOT held during the
+   interactive session):
+   `EnsureImage` (14; while building show spinner line
    `Forging this room for the first time… (docker build, may take a few minutes)`; `built=false` → skip message)
    → `CreateRoom` (15) → `InjectHelpers` (18; motd = banner bytes) → `StartRoom` → Save Run
    (state running) → banner → loop.

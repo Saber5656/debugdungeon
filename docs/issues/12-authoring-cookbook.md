@@ -34,6 +34,8 @@ under the fixed container profile) so content authors don't design infeasible ro
    (background loops with `while true; do …; sleep …; done` supervisors where crash-respawn is
    wanted), writes `/var/dungeon/boot-ok` last, ends with `exec sleep infinity`. No systemd.
    Engine sets Docker `Init: true`. Template ships a commented reference `dungeon-boot.sh`.
+   **tmpfs rule:** anything under a spec `mounts.tmpfs` path MUST be created here at boot — the
+   mount shadows whatever the image baked at that path (DESIGN §6.6 exception).
 4. **Feasible breakage classes** (whitelist with examples): file/dir perms & ownership; config
    file corruption; PATH/env/profile sabotage; cron (must run `cron` daemon in boot script);
    plain-process services & respawn loops; disk-full and inode exhaustion **only inside spec tmpfs
@@ -61,7 +63,8 @@ under the fixed container profile) so content authors don't design infeasible ro
 12. **Spoiler hygiene**: image must not contain hints/solutions/checks; consolidate breakage into
     one `RUN` layer; never `COPY` the scenario root.
 13. **Do-not-break list**: `/dungeon` prefix reserved (engine helpers); do not remove `sh`, `cat`,
-    `ls`, or the entry shell; do not fill `/` (only tmpfs mounts may be filled).
+    `ls`, bash, or coreutils (`timeout` is load-bearing: the lock runner wraps every check with it,
+    DESIGN §7.7); do not fill `/` (only tmpfs mounts may be filled).
 14. **Submission checklist** (copy into content PRs): validator green, `scenario test` green both
     arches, size within budget, hints escalate, solution.md has Lesson Learned, lore sanitized-safe.
 

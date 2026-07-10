@@ -129,9 +129,9 @@ Type: `eng` engineering, `scn` scenario content, `sec` security-critical, `doc` 
 | 20 | 05, 06, 13 |
 | 21 | 10, 14, 15, 16, 17, 18, 20, 26 |
 | 22 | 19, 20, 26 |
-| 23 | 10, 20 |
+| 23 | 10, 11, 20 |
 | 24 | 15, 20 |
-| 25 | 10, 20, 26 |
+| 25 | 10, 11, 20, 26 |
 | 26 | 05, 10 |
 | 27 | 10, 20, 26 |
 | 28 | 10, 26 |
@@ -169,6 +169,10 @@ flowchart LR
 Parallelization notes: within waves, 03/11 are independent early; 07–09 can proceed in parallel
 after 01; scenario issues 40–55 are mutually independent (fan-out friendly); 56–58 and 62–66 are
 independent of Wave 6.
+
+Ordering note: issue numbers are stable IDs, not a strict sequence. Where the dependency table
+disagrees with numeric order, the table wins — concretely, within Wave 3 execute
+**20 → 26 → 21 → 22 → 23 → 24 → 25 → 27 → 28** (26 must precede 21/22/25/27/28).
 
 ---
 
@@ -278,6 +282,7 @@ Tracked from DESIGN §16, owned by the issues noted:
 | KU-8 | `ddgn` alias & tap name availability | 36 |
 | KU-9 | Difficulty calibration accuracy (no telemetry) | 37 feedback templates; may spawn balance issues |
 | KU-10 | lipgloss/bubbletea API churn by Wave 9 | 64 |
+| KU-11 | Service patterns (su, cron, nginx, postgres, redis) under the fixed container profile | 29 (feasibility probe fixtures, before Wave 6 fan-out) |
 
 New unknowns discovered during implementation must become issues referencing this section — not
 silent scope absorbed into unrelated PRs.

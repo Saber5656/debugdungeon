@@ -27,14 +27,17 @@ Locks are the win condition (DESIGN §6.3, §7.7). Scripts never live in the ima
 2. `RunAll(ctx, api, containerID string, l *scenario.Loaded) ([]Report, error)`:
    - For each lock in manifest order (sequential):
      - Read script bytes from `l.FS` at `checks/<file>` (already validated ≤64 KiB by 08).
-     - `ExecCreate`: `Cmd=["/bin/sh","-s"]`, `User="root"`, `Tty=false`, attach stdin+stdout+stderr.
+     - `ExecCreate`: `Cmd=["timeout", strconv.Itoa(timeoutSec), "/bin/sh", "-s"]`, `User="root"`,
+       `Tty=false`, attach stdin+stdout+stderr. Coreutils `timeout` runs INSIDE the container and
+       reliably kills the script (Docker's API cannot kill an exec); cookbook §13 guarantees its
+       presence. `timeout` exiting 124 → CLOSED with `Msg="lock check timed out after Ns"`.
      - Attach; write script; `CloseWrite`; read demuxed output via `stdcopy`, keeping first 4 KiB
        per stream (excess discarded, note appended).
-     - Wait with `context.WithTimeout(ctx, timeout_sec)`:
-       - normal completion → `ExecInspect` exit code: 0 → Open.
-       - timeout → Report `Open=false`, `Msg="lock check timed out after Ns"`; abandon the exec
-         (Docker cannot kill an exec — documented limitation; PidsLimit bounds damage; a
-         subsequent `reset` clears strays). Continue with next lock.
+     - Host-side backstop: `context.WithTimeout(ctx, timeout_sec + 2s)`:
+       - normal completion → `ExecInspect` exit code: 0 → Open; 124 → timeout-CLOSED as above.
+       - backstop trip (in-container timeout gone/wedged) → Report `Open=false`, same timeout Msg,
+         log a stray-process warning (PidsLimit bounds damage; `reset`/teardown clears strays).
+         Continue with next lock.
    - `Msg` extraction (closed locks): last stdout line starting `MSG: ` → suffix; else generic
      "the lock holds fast". Always `textsafe.SanitizeInline` (≤ 200 runes).
    - Full stdout/stderr (capped) + exit code + duration → debug log for every lock.
@@ -46,7 +49,7 @@ Locks are the win condition (DESIGN §6.3, §7.7). Scripts never live in the ima
 
 ## Acceptance Criteria
 
-- [ ] itest matrix above passes; timeout case completes in ~timeout (±1s), not script duration.
+- [ ] itest matrix above passes; timeout case completes in ~timeout (±2s), not script duration, and the sleeping child is actually dead inside the container (pgrep assert — in-container `timeout` did its job).
 - [ ] Hostile `MSG:` bytes arrive sanitized (no ESC in Report.Msg) — asserted.
 - [ ] Output capping proven with a 1 MiB spam script (memory bounded, report notes truncation).
 - [ ] Unit tests for MSG parsing and AllOpen with mocked exec.

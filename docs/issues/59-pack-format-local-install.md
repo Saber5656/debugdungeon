@@ -42,7 +42,9 @@ validation here are security-critical; the consent UX layers on in 61.
       scenario ID colliding with bundled or other installed packs → HARD abort (ErrIDCollision from 10; no override).
    4. Disclosure + confirm (minimal for this issue; 61 enriches): pack name/version/authors,
       scenario count/ids, total size, tmpfs/resource asks above defaults, base image FROM lines
-      (parsed textually from Dockerfiles) → `Install pack '<name>'? Type the pack name to confirm:`
+      (parsed textually from Dockerfiles), and one fixed warning line — installing allows this
+      pack's Dockerfiles to run at first play in the Docker build environment, which has network
+      access (DESIGN §10.6) → `Install pack '<name>'? Type the pack name to confirm:`
       (typed-name confirm; non-TTY → require `--yes-i-trust-this-pack`).
    5. Move into `<state>/packs/<name>/` (atomic: temp → rename within same volume).
    6. Write `packs/<name>/.provenance.json`:

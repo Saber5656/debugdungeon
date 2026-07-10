@@ -32,7 +32,7 @@ output stay in sync.
    - `SV006` topics 1..6 items, each `^[a-z0-9-]{2,20}$`, unique
    - `SV007` time_estimate_min in 5..120
    - `SV008` lore non-empty, ≤ 1500 chars
-   - `SV009` entry.shell and entry.workdir absolute paths; entry.user `^[a-z_][a-z0-9_-]{0,31}$`
+   - `SV009` entry.shell == `/bin/bash` (only allowed value in schema v1, DESIGN §6.2); entry.workdir absolute path; entry.user `^[a-z_][a-z0-9_-]{0,31}$`
    - `SV010` build.context cleaned-relative, stays inside dir, exists, is a directory, contains `Dockerfile`
    - `SV011` locks 1..8; `SV012` lock ids unique, match `^[a-z0-9-]{2,32}$`
    - `SV013` each lock script is a relative path under `checks/`, exists, ≤ 64 KiB
@@ -40,7 +40,7 @@ output stay in sync.
    - `SV015` hints 1..6; files under `hints/`, exist, each ≤ 4 KiB
    - `SV016` solution.walkthrough == `solution.md` and exists ≤ 64 KiB; `SV017` solution.script == `solution.sh` and exists ≤ 64 KiB
    - `SV018` resources within caps (memory_mb 64..2048, cpus 0.1..2.0, pids 16..1024)
-   - `SV019` tmpfs: ≤ 2 mounts; each path absolute, not `/`, not under `/dungeon`, size_mb 1..256, total ≤ 512; nr_inodes 0 or 256..65536
+   - `SV019` tmpfs: ≤ 2 mounts; each path absolute, not `/`, not under `/dungeon`, size_mb 1..256, total ≤ 512; nr_inodes 0 or 256..65536; paths pairwise distinct and non-nested (neither a path-prefix of the other)
    - `SV020` network == `none`
    - `SV021` **no symlinks anywhere** in the scenario tree (walk; any symlink is a violation)
    - `SV022` every file ≤ 4 MiB; total tree ≤ 16 MiB; ≤ 400 files; path depth ≤ 8

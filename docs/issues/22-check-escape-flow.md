@@ -31,7 +31,9 @@ where run → progress handoff happens (§9.4–9.5).
    - Return `Cleared{ScenarioID, Elapsed, Hints, Resets, FirstClear bool, NextSuggestion string}`
      where NextSuggestion = next not-cleared unlocked scenario in registry order (may be empty).
 3. `check` command:
-   - No active run → exit 5. Acquires the run lock (20) — mutating (saves report/state).
+   - No active run → exit 5. Wraps its mutations in `WithLock` (20) short sections — usable from a
+     second terminal while `play` has the shell attached (DESIGN §3.3); a concurrent in-flight
+     mutation surfaces 20's ErrBusy retry message.
    - Prints per-lock line: `Testing lock [name] … OPEN|CLOSED (msg)` (sanitized msg from 19).
    - All open → shared victory rendering (banner: `🏆 ESCAPED in mm:ss with N hints[, M resets]`,
      achievement hook point for 63 marked TODO) → exit 0.

@@ -29,7 +29,8 @@ Ctrl-C passthrough, container death, and non-TTY invocation (F11).
 2. `Run(ctx, api, containerID string, entry scenario.Entry, stdio Stdio) (Outcome, error)`:
    - Precondition: `stdio.In` must be a terminal (`term.IsTerminal`); else return typed error →
      CLI maps to exit 2 with message "play requires an interactive terminal" (F11).
-   - `ExecCreate`: `Cmd=[entry.Shell, "-l"]`, `User=entry.User`, `WorkingDir=entry.Workdir`,
+   - `ExecCreate`: `Cmd=["/bin/bash", "-l"]` (entry.shell is bash-only in schema v1 — SV009;
+     ignore other values defensively), `User=entry.User`, `WorkingDir=entry.Workdir`,
      `Tty=true`, attach stdin/out/err, `Env=["DEBUGDUNGEON=1","HISTFILE=<home>/.dungeon_history","TERM=<host $TERM or xterm-256color>"]`
      where `<home>` = `/root` when user root else `/home/<user>`.
    - `ExecAttach` with Tty; put local stdin into raw mode (`term.MakeRaw`), ALWAYS restore on every

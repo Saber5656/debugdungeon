@@ -35,7 +35,14 @@ production engine pieces (14, 15, 19) — no parallel implementation.
    budget from a map in the harness keyed by floor) → over-budget = FAIL `oversize`.
 3. `scenarios_solvability_test.go`: iterates `Registry.All()` (bundled), subtests per scenario,
    honoring `-run` filtering; env `DD_SCENARIO_FILTER` (comma ids) for CI path-filtering.
-4. `.github/workflows/scenarios.yml` (hardening rules identical to issue 02):
+4. **Service-pattern feasibility fixtures (KU-11 gate)**: under `internal/harness/testdata/feasibility/`,
+   five minimal probe fixtures — `su-login` (su -l round trip), `cron-tick` (cron daemon fires a
+   job), `nginx-boot` (nginx starts + serves 200 on localhost), `postgres-boot` (initdb'd server
+   accepts a query), `redis-boot` (PING) — each a tiny scenario dir run through TestScenario in
+   the itest suite. They prove each pattern works under the fixed profile (CapDrop ALL + allowlist,
+   NNP, network none) BEFORE Wave 6 content is authored; a failing fixture blocks Wave 6 and
+   triggers a design escalation (do NOT weaken the profile unilaterally — DESIGN §10.3).
+5. `.github/workflows/scenarios.yml` (hardening rules identical to issue 02):
    - Triggers: `pull_request` touching `scenarios/**` or engine paths
      (`internal/{dockerx,locks,scenario,harness}/**`), plus weekly cron (full sweep), plus manual dispatch.
    - Matrix: `runs-on: [ubuntu-latest, ubuntu-24.04-arm]` (KU-1: if the arm runner is unavailable
@@ -47,13 +54,14 @@ production engine pieces (14, 15, 19) — no parallel implementation.
    - Disk hygiene: `docker system prune -af` between scenarios when free disk < 4 GB (harness
      checks and prunes managed images oldest-first; simpler: harness removes the image after test
      when env `DD_HARNESS_PRUNE=1`, set in CI).
-5. Failure output must be actionable: print the failing step, closed lock ids, and last 30 lines
+6. Failure output must be actionable: print the failing step, closed lock ids, and last 30 lines
    of solution output.
 
 ## Acceptance Criteria
 
 - [ ] Harness FAILs correctly on three sabotaged fixtures: no boot marker, no initial breakage, broken solution (fixtures under `internal/harness/testdata`).
 - [ ] Harness PASSes `scenarios/_template`.
+- [ ] All five feasibility fixtures PASS on amd64 and arm64 (KU-11 evidence recorded in the PR); any failure is escalated, not worked around.
 - [ ] Workflow runs on a PR touching a fixture scenario and skips on engine-unrelated docs PRs; cron entry present.
 - [ ] Matrix includes arm64 (or documented KU-1 fallback applied).
 - [ ] All actions SHA-pinned; `permissions: contents: read`.

@@ -28,15 +28,20 @@ decided here.
    `creating → running`; `running → checking → running|escaped`; `running → resetting → running`;
    `running → given_up`; `running|checking|resetting → broken`; `broken → resetting`;
    terminal: `escaped`, `given_up` (store cleared, not persisted as states).
+   "Paused" is NOT a state: a detached shell leaves the run `running` (DESIGN §7.3). Implement the
+   §7.3 command-eligibility table as `CanRun(cmd, state) error` (single source for 21–25's guards;
+   transient states → typed `ErrBusy` with the retry message).
 3. Store:
    - `Load(paths) (*Run, error)` — missing file → `(nil, nil)`; corrupt → quarantine to
      `run.json.corrupt-<unix-ts>`, return `(nil, WarnCorrupt)` sentinel the CLI prints once (§8.4).
    - `Save(paths, *Run)` — atomic: temp file (0600) in same dir → fsync → rename; dir perms 0700 (05).
    - `Clear(paths)` — remove run.json (idempotent).
-4. Advisory lock (F9): `Acquire(paths) (release func(), err)` — `O_CREATE` lock file
-   `run.lock` + `unix.Flock(LOCK_EX|LOCK_NB)`; failure → typed `ErrBusy` ("another debugdungeon
-   session is active"). All run-mutating commands acquire it (documented; enforced in 21–25). Read-only
-   `status`/`list` do not.
+4. Advisory lock (F9, short-scoped): `WithLock(paths, func() error) error` — `O_CREATE` `run.lock`
+   + `unix.Flock(LOCK_EX)` with a 2s acquire deadline (poll LOCK_NB every 100ms); deadline →
+   typed `ErrBusy` ("another debugdungeon command is mid-operation — retry in a moment").
+   Held ONLY around load-mutate-save critical sections and engine mutations (evaluate, reset,
+   give-up bookkeeping) — NEVER across the interactive shell attach, so second-terminal
+   `check`/`hint` work during play (DESIGN §3.3, §11 F9). Read-only `status`/`list` skip it.
 5. `Reconcile(ctx, api, run) (*Run, error)`:
    - `ContainerInspect(run.ContainerID)`: not found → state `broken`, container_id kept for message.
    - found & running → unchanged.
@@ -50,7 +55,7 @@ decided here.
 - [ ] Transition matrix unit-tested: every legal edge passes; ≥ 5 illegal edges rejected.
 - [ ] Corrupt-file test: garbage bytes → quarantined file exists, Load returns nil + warning sentinel.
 - [ ] Atomicity: crash-simulation test (write temp, no rename) leaves previous run.json intact.
-- [ ] flock test: second Acquire in-process (new fd) fails with ErrBusy; release frees it.
+- [ ] flock tests: WithLock serializes two goroutines (new fds); a holder past 2s makes the second caller ErrBusy; lock is NOT held during a simulated long session (concurrent WithLock succeeds while "session" runs).
 - [ ] Reconcile paths (missing/running/exited-restartable/exited-dead) covered with mocked API.
 - [ ] File modes: run.json 0600.
 
